@@ -1,0 +1,51 @@
+[project]
+name = "news-agent"
+version = "0.1.0"
+description = "AI-powered investment research agent that auto-analyzes global financial news"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sqlalchemy[asyncio]>=2.0.35",
+    "asyncpg>=0.30.0",
+    "alembic>=1.13.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    "litellm>=1.45.0",
+    "httpx>=0.27.0",
+    "feedparser>=6.0.0",
+    "newspaper3k>=0.2.8",
+    "yfinance>=0.2.40",
+    "fredapi>=0.5.0",
+    
+    "akshare>=1.14.0",
+    "qdrant-client>=1.11.0",
+    "apscheduler>=3.10.0",
+    "lxml>=5.3.0",
+    "python-slugify>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.6.0",
+    "ipython>=8.27.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.ruff]
+target-version = "3.12"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
