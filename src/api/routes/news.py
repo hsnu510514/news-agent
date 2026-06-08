@@ -25,6 +25,10 @@ async def list_news(
     stmt = select(NewsArticle).order_by(desc(NewsArticle.published_at))
     count_stmt = select(func.count()).select_from(NewsArticle)
 
+    # Exclude syndicated content by default
+    stmt = stmt.where(NewsArticle.duplicate_of_id.is_(None))
+    count_stmt = count_stmt.where(NewsArticle.duplicate_of_id.is_(None))
+
     if language:
         stmt = stmt.where(NewsArticle.language == language)
         count_stmt = count_stmt.where(NewsArticle.language == language)
@@ -59,6 +63,51 @@ async def list_news(
                 "summary": r.summary,
                 "published_at": r.published_at.isoformat() if r.published_at else None,
                 "fetched_at": r.fetched_at.isoformat(),
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/syndicated")
+async def list_syndicated_news(
+    limit: int = Query(default=20, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from sqlalchemy.orm import selectinload
+    stmt = (
+        select(NewsArticle)
+        .options(selectinload(NewsArticle.duplicate_of))
+        .where(NewsArticle.duplicate_of_id.isnot(None))
+        .order_by(desc(NewsArticle.published_at))
+    )
+    count_stmt = select(func.count()).select_from(NewsArticle).where(NewsArticle.duplicate_of_id.isnot(None))
+
+    total = (await session.execute(count_stmt)).scalar_one()
+    rows = (await session.execute(stmt.offset(offset).limit(limit))).scalars().all()
+
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "items": [
+            {
+                "id": r.id,
+                "title": r.title,
+                "title_zh": r.title_zh,
+                "url": r.url,
+                "source_type": r.source_type.value,
+                "source_name": r.source_name,
+                "language": r.language.value,
+                "published_at": r.published_at.isoformat() if r.published_at else None,
+                "fetched_at": r.fetched_at.isoformat(),
+                "primary_source": {
+                    "id": r.duplicate_of.id,
+                    "title": r.duplicate_of.title,
+                    "url": r.duplicate_of.url,
+                    "source_name": r.duplicate_of.source_name,
+                } if r.duplicate_of else None,
             }
             for r in rows
         ],

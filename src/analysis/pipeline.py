@@ -9,7 +9,7 @@ from src.storage.vectorstore import upsert_embedding, search_embeddings_with_fil
 from src.analysis.translation import get_glossary_prompt_extension, register_detected_entities
 from src.models.schema import (
     AnalysisResult,
-    FlashNews,
+    MarketWire,
     LanguageEnum,
     NewsArticle,
     SentimentEnum,
@@ -144,7 +144,60 @@ async def process_article_sequentially(article: NewsArticle, session: AsyncSessi
         logger.exception("Failed to get embedding for article %s", article.id)
         query_vector = None
 
-    # 2. Search for similar active insights in vector store
+    # 2. Semantic deduplication check against recently processed articles
+    if query_vector:
+        try:
+            similar_articles = search_embeddings_with_filter(query_vector, type_filter="article", limit=3)
+            best_match = None
+            for match in similar_articles:
+                if match["id"] != article.id and match["score"] >= 0.90:
+                    best_match = match
+                    break
+            
+            if best_match:
+                matched_id = best_match["id"]
+                stmt = select(NewsArticle).where(NewsArticle.id == matched_id)
+                matched_art = (await session.execute(stmt)).scalar_one_or_none()
+                if matched_art:
+                    logger.info("Semantic duplicate found. Article '%s' is syndicated content of '%s' (score: %.3f)", 
+                                article.title[:50], matched_art.title[:50], best_match["score"])
+                    
+                    article.duplicate_of_id = matched_art.id
+                    article.is_relevant = False
+                    
+                    analysis_res = AnalysisResult(
+                        article_id=article.id,
+                        urgency=UrgencyEnum.LOW,
+                        sentiment=SentimentEnum.NEUTRAL,
+                        sentiment_score=0.0,
+                        topics=[],
+                        summary_en=article.title,
+                        summary_zh=article.title_zh,
+                        impact_assessment=f"Syndicated content of: {matched_art.title}",
+                        llm_model="semantic_dedup",
+                    )
+                    session.add(analysis_res)
+                    
+                    try:
+                        upsert_embedding(
+                            point_id=article.id,
+                            vector=query_vector,
+                            payload={
+                                "type": "article",
+                                "title": article.title,
+                                "source_name": article.source_name,
+                                "published_at": article.published_at.isoformat() if article.published_at else None,
+                                "language": article.language.value,
+                            }
+                        )
+                    except Exception:
+                        logger.exception("Failed to save article embedding for syndicated article %s", article.id)
+                        
+                    return
+        except Exception:
+            logger.exception("Failed semantic deduplication check for article %s", article.id)
+
+    # 3. Search for similar active insights in vector store
     existing_insights_text = "None found."
     matching_insights_map = {}
     if query_vector:
@@ -152,8 +205,8 @@ async def process_article_sequentially(article: NewsArticle, session: AsyncSessi
             matches = search_embeddings_with_filter(query_vector, type_filter="insight", limit=3)
             if matches:
                 insight_ids = [m["id"] for m in matches]
-                # Load corresponding Insights and their Subjects
-                stmt = select(Insight).where(Insight.id.in_(insight_ids))
+                from sqlalchemy.orm import selectinload
+                stmt = select(Insight).where(Insight.id.in_(insight_ids)).options(selectinload(Insight.subject))
                 insights = (await session.execute(stmt)).scalars().all()
 
                 insights_list = []
@@ -176,10 +229,10 @@ async def process_article_sequentially(article: NewsArticle, session: AsyncSessi
         except Exception:
             logger.exception("Failed to query similar insights for article %s", article.id)
 
-    # 3. Get glossary terms
+    # 4. Get glossary terms
     glossary_extension = await get_glossary_prompt_extension(text_to_embed, session)
 
-    # 4. Construct prompt
+    # 5. Construct prompt
     prompt_template = _load_prompt("sequential.txt")
     prompt = prompt_template.format(
         title=article.title,
@@ -188,7 +241,7 @@ async def process_article_sequentially(article: NewsArticle, session: AsyncSessi
         glossary_extension=glossary_extension,
     )
 
-    # 5. Call LLM
+    # 6. Call LLM
     raw_response = await classify(prompt)
     decision = _parse_json(raw_response, {"action": "NO_CHANGE"})
 

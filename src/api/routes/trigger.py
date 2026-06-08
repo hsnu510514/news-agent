@@ -8,6 +8,7 @@ from src.ingest.earnings_fetcher import ingest_yfinance_earnings
 from src.ingest.macro_fetcher import ingest_fred, ingest_akshare
 from src.ingest.dedup import deduplicate_news
 from src.analysis.classifier import run_analysis_pipeline
+from src.analysis.briefing import generate_daily_briefing
 
 router = APIRouter()
 
@@ -59,3 +60,9 @@ async def trigger_dedup(background_tasks: BackgroundTasks) -> TriggerResponse:
 async def trigger_analyze(background_tasks: BackgroundTasks) -> TriggerResponse:
     background_tasks.add_task(run_analysis_pipeline)
     return TriggerResponse(job="analyze", status="started")
+
+
+@router.post("/briefing")
+async def trigger_briefing(background_tasks: BackgroundTasks) -> TriggerResponse:
+    background_tasks.add_task(generate_daily_briefing)
+    return TriggerResponse(job="briefing", status="started")

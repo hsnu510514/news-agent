@@ -78,6 +78,13 @@ class NewsArticle(Base):
     )
     extra: Mapped[dict | None] = mapped_column(JSONB)
     is_relevant: Mapped[bool | None] = mapped_column(Boolean, default=True)
+    duplicate_of_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("news_articles.id", ondelete="SET NULL"), index=True
+    )
+
+    duplicate_of = relationship(
+        "NewsArticle", remote_side=[id], backref="syndicated_articles"
+    )
 
     __table_args__ = (Index("ix_news_published", "published_at", "source_type"),)
 
@@ -156,8 +163,8 @@ class AnalysisResult(Base):
     article = relationship("NewsArticle", backref="analysis")
 
 
-class FlashNews(Base):
-    __tablename__ = "flash_news"
+class MarketWire(Base):
+    __tablename__ = "market_wires"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     source_type: Mapped[SourceTypeEnum] = mapped_column(Enum(SourceTypeEnum), nullable=False)
@@ -172,7 +179,7 @@ class FlashNews(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    __table_args__ = (Index("ix_flash_published", "published_at", "importance"),)
+    __table_args__ = (Index("ix_market_wire_published", "published_at", "importance"),)
 
 
 class JobConfig(Base):
@@ -270,3 +277,19 @@ class DailyBriefing(Base):
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class TaskRun(Base):
+    __tablename__ = "task_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    job_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    task_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    trigger_type: Mapped[str] = mapped_column(String(20), default="manual", nullable=False)  # "scheduled" or "manual"
+    status: Mapped[str] = mapped_column(String(20), default="running", nullable=False)  # "running", "success", "failed"
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    message: Mapped[str | None] = mapped_column(Text)

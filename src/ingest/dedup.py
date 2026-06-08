@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select, func
 
-from src.models.schema import NewsArticle, FlashNews
+from src.models.schema import NewsArticle, MarketWire
 from src.storage.database import async_session_factory
 
 logger = logging.getLogger("news-agent")
@@ -32,12 +32,13 @@ async def deduplicate_news() -> dict:
                 await session.execute(
                     select(NewsArticle)
                     .where(NewsArticle.url_hash == url_hash)
-                    .order_by(NewsArticle.fetched_at.desc())
+                    .order_by(NewsArticle.fetched_at.asc())
                 )
             ).scalars().all()
 
             for article in articles[1:]:
-                await session.delete(article)
+                article.duplicate_of_id = articles[0].id
+                article.is_relevant = False
                 stats["duplicates_removed"] += 1
 
         content_stmt = (
@@ -54,12 +55,13 @@ async def deduplicate_news() -> dict:
                 await session.execute(
                     select(NewsArticle)
                     .where(NewsArticle.content_hash == content_hash)
-                    .order_by(NewsArticle.fetched_at.desc())
+                    .order_by(NewsArticle.fetched_at.asc())
                 )
             ).scalars().all()
 
             for article in articles[1:]:
-                await session.delete(article)
+                article.duplicate_of_id = articles[0].id
+                article.is_relevant = False
                 stats["content_deduped"] += 1
 
         await session.commit()

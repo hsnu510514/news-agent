@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     LLM_CLASSIFY_MODEL: str = "gemini/gemini-2.0-flash"
     LLM_SUMMARIZE_MODEL: str = "gemini/gemini-2.0-flash"
     LLM_ANALYSIS_MODEL: str = "gemini/gemini-2.5-pro"
-    LLM_EMBED_MODEL: str = "gemini/text-embedding-004"
+    LLM_RELEVANCE_MODEL: str = "gemini/gemini-3.1-flash-lite"
+    LLM_EMBED_MODEL: str = "gemini/gemini-embedding-2"
+    LLM_EMBED_FALLBACK_MODEL: str = "gemini/gemini-embedding-001"
 
     NEWS_FETCH_INTERVAL_MINUTES: int = 30
     NEWSAPI_FETCH_INTERVAL_MINUTES: int = 60

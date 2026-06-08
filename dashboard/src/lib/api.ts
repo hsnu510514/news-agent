@@ -39,7 +39,7 @@ export type AnalysisItem = {
   analyzed_at: string;
 };
 
-export type FlashItem = {
+export type MarketWireItem = {
   id: string;
   content: string;
   language: string;
@@ -56,8 +56,10 @@ export type EarningsItem = {
   period: string | null;
   fiscal_year: number | null;
   revenue: number | null;
+  net_income?: number | null;
   eps: number | null;
   eps_estimate: number | null;
+  revenue_estimate?: number | null;
   report_date: string | null;
 };
 
@@ -101,3 +103,59 @@ export function getUrgencyBadge(urgency: string | null): { label: string; varian
       return { label: "N/A", variant: "outline" };
   }
 }
+
+export type AlertItem = {
+  id: string;
+  subject_name: string;
+  dimension_name: string;
+  summary_en: string;
+  summary_zh: string;
+  last_updated_at: string;
+  recent_fact: string | null;
+  recent_fact_zh: string | null;
+};
+
+export type DailyBriefingItem = {
+  id: string;
+  summary_en: string;
+  summary_zh: string;
+  key_takeaways_en: string[] | null;
+  key_takeaways_zh: string[] | null;
+  generated_at: string;
+};
+
+export type SubjectItem = {
+  id: string;
+  name: string;
+  type: "ticker" | "macro" | "theme";
+  tags: string[] | null;
+};
+
+export type InsightFactSourceArticle = {
+  id: string;
+  title: string;
+  title_zh: string | null;
+  url: string;
+  source_name: string;
+};
+
+export type InsightFactItem = {
+  id: string;
+  bullet_text_en: string;
+  bullet_text_zh: string;
+  created_at: string;
+  source_article: InsightFactSourceArticle | null;
+};
+
+export type InsightItem = {
+  id: string;
+  dimension_name: string;
+  summary_en: string;
+  summary_zh: string;
+  urgency: string;
+  sentiment: string;
+  tags: string[] | null;
+  last_updated_at: string;
+  subject: SubjectItem;
+  facts: InsightFactItem[];
+};

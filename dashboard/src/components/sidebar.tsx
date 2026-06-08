@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { Newspaper, BarChart3, Zap, DollarSign, Globe, Settings } from "lucide-react";
+import { Newspaper, BarChart3, Zap, DollarSign, Globe, Settings, Database } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: BarChart3 },
+  { href: "/insights", label: "Insight Vault", icon: Database },
   { href: "/news", label: "News", icon: Newspaper },
-  { href: "/flash", label: "Flash", icon: Zap },
+  { href: "/market-wire", label: "Market Wire", icon: Zap },
   { href: "/earnings", label: "Earnings", icon: DollarSign },
   { href: "/macro", label: "Macro", icon: Globe },
   { href: "/settings", label: "Settings", icon: Settings },

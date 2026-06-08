@@ -79,11 +79,12 @@ async def _process_feed(
         if not title:
             continue
 
+        description = entry.get("summary", "") or ""
         content = ""
-        if hasattr(entry, "summary"):
-            content = entry.summary or ""
         if hasattr(entry, "content") and entry.content:
-            content = entry.content[0].get("value", content)
+            content = entry.content[0].get("value", "")
+        if not content:
+            content = description
 
         published_at = None
         if hasattr(entry, "published_parsed") and entry.published_parsed:
@@ -92,11 +93,13 @@ async def _process_feed(
             except Exception:
                 pass
 
-        is_relevant = await check_relevance(title, content[:1000] if content else "")
+        is_relevant = await check_relevance(title, description)
         if not is_relevant:
             logger.info("Filtered out irrelevant news article: %s", title)
             content = None
             content_hash = None
+        else:
+            content_hash = _hash_content(content) if content else None
 
         article = NewsArticle(
             url=url,

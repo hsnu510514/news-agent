@@ -21,7 +21,8 @@ async def generate_daily_briefing() -> DailyBriefing | None:
         cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=24)
 
         # Retrieve all insights updated in the last 24 hours
-        stmt = select(Insight).where(Insight.last_updated_at >= cutoff)
+        from sqlalchemy.orm import selectinload
+        stmt = select(Insight).where(Insight.last_updated_at >= cutoff).options(selectinload(Insight.subject))
         insights = (await session.execute(stmt)).scalars().all()
 
         if not insights:
@@ -67,7 +68,7 @@ async def generate_daily_briefing() -> DailyBriefing | None:
         )
 
         try:
-            raw_response = await deep_analysis(prompt)
+            raw_response = await deep_analysis(prompt, priority=0)
             clean_response = raw_response.strip()
             if clean_response.startswith("```json"):
                 clean_response = clean_response[7:]

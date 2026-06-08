@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy import select
 
 from src.core.config import settings
-from src.models.schema import FlashNews, SourceTypeEnum, LanguageEnum
+from src.models.schema import MarketWire, SourceTypeEnum, LanguageEnum
 from src.storage.database import async_session_factory
 
 logger = logging.getLogger("news-agent")
@@ -50,7 +50,7 @@ async def ingest_jin10() -> int:
             content_hash = hashlib.sha256(content.encode()).hexdigest()
 
             existing = await session.execute(
-                select(FlashNews).where(FlashNews.content_hash == content_hash)
+                select(MarketWire).where(MarketWire.content_hash == content_hash)
             )
             if existing.scalar_one_or_none():
                 continue
@@ -68,7 +68,7 @@ async def ingest_jin10() -> int:
 
             related_symbols = item.get("data", {}).get("symbols") or item.get("symbols") or []
 
-            flash = FlashNews(
+            flash = MarketWire(
                 content=content[:10000],
                 content_hash=content_hash,
                 source_type=SourceTypeEnum.JIN10,
@@ -113,7 +113,7 @@ async def _ingest_jin10_rss(client: httpx.AsyncClient) -> int:
                 content_hash = hashlib.sha256(content.encode()).hexdigest()
 
                 existing = await session.execute(
-                    select(FlashNews).where(FlashNews.content_hash == content_hash)
+                    select(MarketWire).where(MarketWire.content_hash == content_hash)
                 )
                 if existing.scalar_one_or_none():
                     continue
@@ -125,7 +125,7 @@ async def _ingest_jin10_rss(client: httpx.AsyncClient) -> int:
                     except Exception:
                         pass
 
-                flash = FlashNews(
+                flash = MarketWire(
                     content=content[:10000],
                     content_hash=content_hash,
                     source_type=SourceTypeEnum.JIN10,
