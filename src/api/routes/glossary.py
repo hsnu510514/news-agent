@@ -82,3 +82,31 @@ async def verify_glossary_item(
     item.is_verified = True
     await session.commit()
     return {"status": "verified"}
+
+
+class GlossaryItemUpdate(BaseModel):
+    term_en: str
+    term_zh: str
+    type: str = "company"
+    is_verified: bool = True
+
+
+@router.put("/{item_id}")
+async def update_glossary_item(
+    item_id: str,
+    item: GlossaryItemUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    stmt = select(EntityGlossary).where(EntityGlossary.id == item_id)
+    db_item = (await session.execute(stmt)).scalar_one_or_none()
+
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Glossary item not found")
+
+    db_item.term_en = item.term_en
+    db_item.term_zh = item.term_zh
+    db_item.type = item.type
+    db_item.is_verified = item.is_verified
+    await session.commit()
+    return {"status": "updated"}
+

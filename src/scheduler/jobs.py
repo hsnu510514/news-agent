@@ -11,7 +11,8 @@ from sqlalchemy import select, update
 
 from src.core.config import settings
 from src.storage.database import async_session_factory
-from src.models.schema import JobConfig
+from src.models.schema import JobConfig, TaskRun
+import inspect
 
 logger = logging.getLogger("news-agent")
 
@@ -61,10 +62,11 @@ async def _job_dedup() -> None:
     logger.info("Deduplication complete: %s", stats)
 
 
-async def _job_analysis() -> None:
+async def _job_analysis(task_run_id: str | None = None) -> None:
     logger.info("Starting analysis pipeline")
     from src.analysis.classifier import run_analysis_pipeline
-    stats = await run_analysis_pipeline(batch_size=20)
+    # Pass task_run_id down to pipeline
+    stats = await run_analysis_pipeline(batch_size=20, task_run_id=task_run_id)
     logger.info("Analysis complete: %s", stats)
 
 
@@ -151,7 +153,7 @@ def _create_trigger(job_id: str, trigger_type: str, schedule_value: str):
         raise ValueError(f"Invalid trigger type: {trigger_type}")
 
 
-async def run_job_wrapper(job_id: str) -> None:
+async def run_job_wrapper(job_id: str, trigger_type: str = "scheduled") -> None:
     job_funcs = {
         "rss_news": _job_rss_news,
         "newsapi": _job_newsapi,
@@ -167,15 +169,45 @@ async def run_job_wrapper(job_id: str) -> None:
         logger.error(f"Job function for {job_id} not found")
         return
 
-    logger.info(f"Starting scheduled run for job: {job_id}")
+    logger.info(f"Starting run for job: {job_id} ({trigger_type})")
+    
+    # 1. Initialize TaskRun in DB
+    import uuid
+    task_name = job_id
+    task_run_id = str(uuid.uuid4())
+    async with async_session_factory() as session:
+        try:
+            result = await session.execute(select(JobConfig).where(JobConfig.id == job_id))
+            config = result.scalar_one_or_none()
+            if config:
+                task_name = config.name
+            
+            task_run = TaskRun(
+                id=task_run_id,
+                job_id=job_id,
+                task_name=task_name,
+                trigger_type=trigger_type,
+                status="running",
+                start_time=datetime.now(timezone.utc),
+            )
+            session.add(task_run)
+            await session.commit()
+        except Exception:
+            logger.exception(f"Failed to initialize TaskRun in DB for {job_id}")
+
+
     status = "success"
     message = ""
     try:
-        await func()
+        sig = inspect.signature(func)
+        if "task_run_id" in sig.parameters:
+            await func(task_run_id=task_run_id)
+        else:
+            await func()
     except Exception as e:
         status = "failed"
         message = traceback.format_exc()
-        logger.exception(f"Job {job_id} failed during scheduled run")
+        logger.exception(f"Job {job_id} failed during execution")
 
     async with async_session_factory() as session:
         try:
@@ -188,9 +220,21 @@ async def run_job_wrapper(job_id: str) -> None:
                     last_run_message=message
                 )
             )
+            
+            if task_run_id:
+                await session.execute(
+                    update(TaskRun)
+                    .where(TaskRun.id == task_run_id)
+                    .values(
+                        status=status,
+                        end_time=datetime.now(timezone.utc),
+                        message=message if status == "failed" else None
+                    )
+                )
             await session.commit()
         except Exception:
-            logger.exception(f"Failed to update job status in DB for {job_id}")
+            logger.exception(f"Failed to update final job/task status in DB for {job_id}")
+
 
 
 def reschedule_job_in_scheduler(config: JobConfig) -> None:

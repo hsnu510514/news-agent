@@ -29,20 +29,20 @@ def upsert_embedding(point_id: str, vector: list[float], payload: dict) -> None:
 
 
 def search_embeddings(query_vector: list[float], limit: int = 10) -> list[dict]:
-    results = client.search(
+    results = client.query_points(
         collection_name=COLLECTION_NAME,
-        query_vector=query_vector,
+        query=query_vector,
         limit=limit,
     )
-    return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results]
+    return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results.points]
 
 
 def search_embeddings_with_filter(query_vector: list[float], type_filter: str, limit: int = 10) -> list[dict]:
     from qdrant_client.models import Filter, FieldCondition, MatchValue
 
-    results = client.search(
+    results = client.query_points(
         collection_name=COLLECTION_NAME,
-        query_vector=query_vector,
+        query=query_vector,
         query_filter=Filter(
             must=[
                 FieldCondition(key="type", match=MatchValue(value=type_filter))
@@ -50,4 +50,4 @@ def search_embeddings_with_filter(query_vector: list[float], type_filter: str, l
         ),
         limit=limit,
     )
-    return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results]
+    return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results.points]

@@ -79,8 +79,9 @@ async def _fetch_newsapi(session: AsyncSession, lang: str, query: str) -> int:
         if not title or title == "[Removed]":
             continue
 
-        content = art.get("content") or art.get("description") or ""
-        is_relevant = await check_relevance(title, content[:1000] if content else "")
+        description = art.get("description") or ""
+        content = art.get("content") or description
+        is_relevant = await check_relevance(title, description)
         if not is_relevant:
             logger.info("Filtered out irrelevant newsapi article: %s", title)
             content = None
@@ -88,7 +89,8 @@ async def _fetch_newsapi(session: AsyncSession, lang: str, query: str) -> int:
             summary = None
         else:
             content_hash = hashlib.sha256(content.encode()).hexdigest() if content else None
-            summary = art.get("description")
+            summary = description
+
 
         published_at = None
         published_str = art.get("publishedAt")

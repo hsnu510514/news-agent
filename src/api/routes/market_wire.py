@@ -2,25 +2,25 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.schema import FlashNews, LanguageEnum
+from src.models.schema import MarketWire, LanguageEnum
 from src.storage.database import get_session
 
 router = APIRouter()
 
 
 @router.get("")
-async def list_flash(
+async def list_market_wires(
     language: LanguageEnum | None = None,
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    stmt = select(FlashNews).order_by(desc(FlashNews.published_at))
-    count_stmt = select(func.count()).select_from(FlashNews)
+    stmt = select(MarketWire).order_by(desc(MarketWire.published_at))
+    count_stmt = select(func.count()).select_from(MarketWire)
 
     if language:
-        stmt = stmt.where(FlashNews.language == language)
-        count_stmt = count_stmt.where(FlashNews.language == language)
+        stmt = stmt.where(MarketWire.language == language)
+        count_stmt = count_stmt.where(MarketWire.language == language)
 
     total = (await session.execute(count_stmt)).scalar_one()
     rows = (await session.execute(stmt.offset(offset).limit(limit))).scalars().all()

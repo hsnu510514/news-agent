@@ -30,7 +30,11 @@ _Avoid_: analysis, report
 
 **Emergency Alert**:
 A high-impact, immediate geopolitical or financial shock (e.g. military conflict, trade tariffs, banking failures) that requires immediate user attention.
-_Avoid_: notification, warning, flash news
+_Avoid_: notification, warning, flash news, market wire
+
+**Market Wire**:
+Raw, real-time news updates streamed directly from third-party outlets without LLM analysis or synthesis.
+_Avoid_: flash news, raw alert, notification feed
 
 **Daily Briefing**:
 A synthesized summary report generated every morning, highlighting key updates and changes in the Insight Vault over the previous 24 hours.
@@ -39,3 +43,8 @@ _Avoid_: daily report, newsletter, morning summary
 **Entity Glossary**:
 A translation dictionary containing bilingual names and tickers for companies, industries, macro entities, and technical terms to ensure consistency.
 _Avoid_: translation dictionary, name mapping
+
+**Task Execution**:
+A single execution run of any background process (such as news fetching, deduplication, AI analysis, or briefing generation), whether scheduled or manually triggered.
+_Avoid_: job run, task run, scheduler run
+
