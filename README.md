@@ -29,7 +29,7 @@ Uses LiteLLM to route tasks to the configured LLM (defaults to Gemini):
 - **Classification/Tagging** → Gemini 2.0 Flash (fast, cheap)
 - **Summarization** → Gemini 2.0 Flash (excellent bilingual output)
 - **Deep Analysis** → Gemini 2.5 Pro (best reasoning)
-- **Embeddings** → Gemini text-embedding-004 (768 dimensions)
+- **Embeddings** → Gemini gemini-embedding-2 (768 dimensions)
 
 ## Quick Start
 
@@ -122,7 +122,7 @@ All settings in `.env` or `src/core/config.py`:
 | `LLM_CLASSIFY_MODEL` | `gemini/gemini-2.0-flash` | Model for classification |
 | `LLM_SUMMARIZE_MODEL` | `gemini/gemini-2.0-flash` | Model for summarization |
 | `LLM_ANALYSIS_MODEL` | `gemini/gemini-2.5-pro` | Model for deep analysis |
-| `LLM_EMBED_MODEL` | `gemini/text-embedding-004` | Embedding model |
+| `LLM_EMBED_MODEL` | `gemini/gemini-embedding-2` | Embedding model |
 | `NEWS_FETCH_INTERVAL_MINUTES` | `30` | News fetch interval |
 | `SCHEDULER_ENABLED` | `true` | Enable auto-scheduling |
 
@@ -159,7 +159,7 @@ Use LiteLLM's model naming convention (`provider/model-name`):
 
 | Provider | Classify/Summarize | Deep Analysis | Embeddings |
 |----------|--------------------|--------------|------------|
-| **Gemini** (default) | `gemini/gemini-2.0-flash` | `gemini/gemini-2.5-pro` | `gemini/text-embedding-004` |
+| **Gemini** (default) | `gemini/gemini-2.0-flash` | `gemini/gemini-2.5-pro` | `gemini/gemini-embedding-2` |
 | OpenAI | `openai/gpt-4o-mini` | `openai/gpt-4o` | `openai/text-embedding-3-small` |
 | Anthropic | `anthropic/claude-sonnet-4-20250514` | `anthropic/claude-sonnet-4-20250514` | `openai/text-embedding-3-small` ⚠️ |
 | Ollama (local) | `ollama/llama3.1:8b` | `ollama/deepseek-r1:14b` | `ollama/nomic-embed-text` |
@@ -170,7 +170,7 @@ The 4 env vars to set:
 LLM_CLASSIFY_MODEL=gemini/gemini-2.0-flash
 LLM_SUMMARIZE_MODEL=gemini/gemini-2.0-flash
 LLM_ANALYSIS_MODEL=gemini/gemini-2.5-pro
-LLM_EMBED_MODEL=gemini/text-embedding-004
+LLM_EMBED_MODEL=gemini/gemini-embedding-2
 ```
 
 #### 3. Vector Dimension in `src/storage/vectorstore.py`
@@ -186,7 +186,7 @@ Then restart the app — it will auto-create the collection with the new dimensi
 
 | Embedding Model | Dimension |
 |----------------|-----------|
-| `gemini/text-embedding-004` | **768** ← current default |
+| `gemini/gemini-embedding-2` | **768** ← current default |
 | `openai/text-embedding-3-small` | 1536 |
 | `openai/text-embedding-3-large` | 3072 |
 | `ollama/nomic-embed-text` | 768 |

@@ -52,18 +52,34 @@ class LLMTaskQueue:
         self._seq = 0
         self._worker_task = None
         self._running = False
+        self._quota_exhausted = False
         self.pacing_delay = 4.0
         self.backoff_factor = 2.0
         self.status_tracker = api_status_tracker
 
     async def submit_task(self, priority: int, func: Callable, *args, **kwargs) -> asyncio.Future:
+        # Check if the day has changed since last reset to automatically reset and restart the queue
+        if date.today() != self.status_tracker._last_reset_date:
+            self.status_tracker.status = "healthy"
+            self.status_tracker.error_message = ""
+            self.status_tracker.requests_made_today = 0
+            self.status_tracker._last_reset_date = date.today()
+            self._quota_exhausted = False
+            self.start()
+
         loop = asyncio.get_running_loop()
         future = loop.create_future()
+        if self._quota_exhausted:
+            error_msg = self.status_tracker.error_message or "LLM queue is not running due to daily quota exhaustion."
+            future.set_exception(DailyQuotaExhaustedError(error_msg))
+            return future
+
         self._seq += 1
         await self._queue.put((priority, self._seq, future, func, args, kwargs))
         return future
 
     def start(self):
+        self._quota_exhausted = False
         if not self._running:
             self._running = True
             self._worker_task = asyncio.create_task(self._worker_loop())
@@ -127,6 +143,7 @@ class LLMTaskQueue:
                         )
                         
                         if is_permanent_quota:
+                            self._quota_exhausted = True
                             self.status_tracker.record_failure(error_msg, is_rate_limit)
                             future.set_exception(DailyQuotaExhaustedError(error_msg))
                             # Fail all other pending tasks in the queue

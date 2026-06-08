@@ -46,7 +46,7 @@ class AnalysisStatsResponse(BaseModel):
     total_news: int
     pending_news: int
     active_run: Optional[TaskRunResponse] = None
-    last_failed_run: Optional[TaskRunResponse] = None
+    llm_api_status: Optional[dict] = None
 
 
 @router.get("/active", response_model=List[TaskRunResponse])
@@ -65,6 +65,7 @@ async def get_analysis_stats(
     from src.models.schema import NewsArticle, AnalysisResult
     from sqlalchemy import func, and_
     from datetime import datetime, timezone, timedelta
+    from src.core.llm import api_status_tracker
 
     # 1. Total news count
     stmt_total = select(func.count(NewsArticle.id))
@@ -82,28 +83,24 @@ async def get_analysis_stats(
     )
     pending_news = (await session.execute(stmt_pending)).scalar_one_or_none() or 0
 
-    # 3. Active analysis run
+    # 3. Active run (any active running job, not just 'analysis')
     stmt_active = (
         select(TaskRun)
-        .where(and_(TaskRun.job_id == "analysis", TaskRun.status == "running"))
+        .where(TaskRun.status == "running")
         .order_by(TaskRun.start_time.desc())
         .limit(1)
     )
     active_run = (await session.execute(stmt_active)).scalars().first()
 
-    # 4. Last failed analysis run
-    stmt_failed = (
-        select(TaskRun)
-        .where(and_(TaskRun.job_id == "analysis", TaskRun.status == "failed"))
-        .order_by(TaskRun.start_time.desc())
-        .limit(1)
-    )
-    last_failed_run = (await session.execute(stmt_failed)).scalars().first()
-
     return {
         "total_news": total_news,
         "pending_news": pending_news,
         "active_run": active_run,
-        "last_failed_run": last_failed_run,
+        "llm_api_status": {
+            "status": api_status_tracker.status,
+            "error_message": api_status_tracker.error_message,
+            "requests_made_today": api_status_tracker.requests_made_today,
+            "estimated_daily_limit": api_status_tracker.estimated_daily_limit,
+        }
     }
 

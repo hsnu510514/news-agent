@@ -138,4 +138,45 @@ async def test_priority_queue_daily_quota_abort():
     assert queue.status_tracker.status == "rate_limited"
 
 
+@pytest.mark.asyncio
+async def test_priority_queue_submit_when_stopped():
+    from src.core.llm import DailyQuotaExhaustedError
+    queue = LLMTaskQueue()
+    queue._quota_exhausted = True  # Simulate daily quota exhaustion
+    
+    async def mock_task():
+        return "success"
+        
+    with pytest.raises(DailyQuotaExhaustedError):
+        fut = await queue.submit_task(priority=1, func=mock_task)
+        await fut
+
+
+@pytest.mark.asyncio
+async def test_priority_queue_day_change_restart():
+    from src.core.llm import DailyQuotaExhaustedError
+    from datetime import date, timedelta
+    queue = LLMTaskQueue()
+    queue.pacing_delay = 0.0
+    queue.backoff_factor = 0.001
+    
+    # Simulate yesterday's reset date and rate limited status
+    queue.status_tracker.error_message = "Rate limit hit"
+    queue.status_tracker.status = "rate_limited"
+    queue.status_tracker._last_reset_date = date.today() - timedelta(days=1)
+    
+    async def mock_task():
+        return "restarted_success"
+        
+    # submit_task should reset date and start the queue automatically
+    fut = await queue.submit_task(priority=1, func=mock_task)
+    assert queue._running is True
+    assert queue.status_tracker.status == "healthy"
+    assert queue.status_tracker._last_reset_date == date.today()
+    
+    res = await fut
+    assert res == "restarted_success"
+    await queue.stop()
+
+
 

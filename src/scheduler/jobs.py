@@ -77,7 +77,8 @@ async def _job_briefing() -> None:
     if briefing:
         logger.info("Daily Briefing generation complete.")
     else:
-        logger.info("Daily Briefing generation failed.")
+        logger.error("Daily Briefing generation failed.")
+        raise RuntimeError("Daily Briefing generation failed. Check logs for details.")
 
 
 DEFAULT_JOBS = [

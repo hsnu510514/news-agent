@@ -55,7 +55,6 @@ async def run_analysis_pipeline(batch_size: int = 20, urgent_only: bool = False,
                     logger.exception("Failed to update TaskRun total_count")
 
             for article in articles:
-                article_id = article.id
                 try:
                     # Process sequentially
                     await process_article_sequentially(article, session)
@@ -85,8 +84,7 @@ async def run_analysis_pipeline(batch_size: int = 20, urgent_only: bool = False,
                                 .where(TaskRun.id == task_run_id)
                                 .values(
                                     processed_count=stats["analyzed"],
-                                    failed_count=stats["failed"],
-                                    message=str(e)
+                                    failed_count=stats["failed"]
                                 )
                             )
                             await session.commit()
@@ -94,7 +92,7 @@ async def run_analysis_pipeline(batch_size: int = 20, urgent_only: bool = False,
                         logger.exception("Failed to update TaskRun status on quota abort")
                     logger.error("Daily API quota exhausted. Aborting analysis pipeline run early. Error: %s", e)
                     break
-                except Exception as e:
+                except Exception:
                     stats["failed"] += 1
                     try:
                         await session.rollback()
@@ -106,14 +104,13 @@ async def run_analysis_pipeline(batch_size: int = 20, urgent_only: bool = False,
                                 .where(TaskRun.id == task_run_id)
                                 .values(
                                     processed_count=stats["analyzed"],
-                                    failed_count=stats["failed"],
-                                    message=str(e)
+                                    failed_count=stats["failed"]
                                 )
                             )
                             await session.commit()
                     except Exception:
                         logger.exception("Failed to update TaskRun status on error")
-                    logger.exception("Failed to analyze article sequentially: %s", article_id)
+                    logger.exception("Failed to analyze article sequentially: %s", article.id)
 
         logger.info("Analysis pipeline complete: %s", stats)
         return stats
