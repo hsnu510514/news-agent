@@ -17,13 +17,14 @@ def test_collector_source_type_enum() -> None:
 async def test_ingest_collector_initial() -> None:
     # Arrange
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     
     mock_result = MagicMock()
     mock_result.scalar.return_value = None  # No watermark
     mock_result.scalar_one_or_none.return_value = None  # Article doesn't exist
     mock_session.execute.return_value = mock_result
     mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
     
     mock_session_factory = MagicMock()
     mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -55,9 +56,9 @@ async def test_ingest_collector_initial() -> None:
     from src.ingest.collector_fetcher import ingest_collector
 
     with (
-        patch("src.ingest.collector_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response) as mock_get,
-        patch("src.ingest.collector_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.collector_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_check.return_value = True
         
@@ -90,7 +91,7 @@ async def test_ingest_collector_initial() -> None:
 async def test_ingest_collector_incremental() -> None:
     # Arrange
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     
     mock_result = MagicMock()
     # Watermark = June 12, 2026 07:05:00 UTC
@@ -99,6 +100,7 @@ async def test_ingest_collector_incremental() -> None:
     mock_result.scalar_one_or_none.return_value = None  # Article doesn't exist
     mock_session.execute.return_value = mock_result
     mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
     
     mock_session_factory = MagicMock()
     mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -130,9 +132,9 @@ async def test_ingest_collector_incremental() -> None:
     from src.ingest.collector_fetcher import ingest_collector
 
     with (
-        patch("src.ingest.collector_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response) as mock_get,
-        patch("src.ingest.collector_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.collector_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_check.return_value = True
         
@@ -154,13 +156,14 @@ async def test_ingest_collector_incremental() -> None:
 async def test_ingest_collector_normalization() -> None:
     # Arrange
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     
     mock_result = MagicMock()
     mock_result.scalar.return_value = None
     mock_result.scalar_one_or_none.return_value = None
     mock_session.execute.return_value = mock_result
     mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
     
     mock_session_factory = MagicMock()
     mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -185,9 +188,9 @@ async def test_ingest_collector_normalization() -> None:
     from src.ingest.collector_fetcher import ingest_collector
 
     with (
-        patch("src.ingest.collector_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response),
-        patch("src.ingest.collector_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.collector_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_check.return_value = True
         
@@ -206,13 +209,14 @@ async def test_ingest_collector_normalization() -> None:
 async def test_ingest_collector_filtering() -> None:
     # Arrange
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     
     mock_result = MagicMock()
     mock_result.scalar.return_value = None
     mock_result.scalar_one_or_none.return_value = None
     mock_session.execute.return_value = mock_result
     mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
     
     mock_session_factory = MagicMock()
     mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -243,9 +247,9 @@ async def test_ingest_collector_filtering() -> None:
     from src.ingest.collector_fetcher import ingest_collector
 
     with (
-        patch("src.ingest.collector_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response),
-        patch("src.ingest.collector_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.collector_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_check.return_value = True
         
@@ -278,8 +282,9 @@ async def test_run_job_wrapper_collector() -> None:
     
     mock_job_func = AsyncMock()
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
     
     mock_session_factory = MagicMock()
     mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)

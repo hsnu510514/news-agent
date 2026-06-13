@@ -53,16 +53,11 @@ def _normalize_source_name(name: str) -> str:
     return name.strip()
 
 
-async def ingest_collector(task_run_id: str | None = None) -> int:
-    total_saved = 0
-    total_fetched = 0
-    enabled_sources = [
-        s.strip().lower()
-        for s in settings.ENABLED_COLLECTOR_SOURCES.split(",")
-        if s.strip()
-    ]
+from typing import Sequence
+from src.ingest.interface import BaseIngestAdapter, IngestionSourceType
 
-    async with async_session_factory() as session:
+class CollectorIngestAdapter(BaseIngestAdapter):
+    async def fetch(self, client: httpx.AsyncClient, session: AsyncSession) -> Sequence[NewsArticle]:
         # 1. Retrieve the latest sync watermark
         stmt = select(func.max(NewsArticle.fetched_at)).where(
             NewsArticle.source_type == SourceTypeEnum.COLLECTOR
@@ -74,7 +69,6 @@ async def ingest_collector(task_run_id: str | None = None) -> int:
         limit = 100
         offset = 0
         
-        # Format the base URL and endpoint
         base_url = settings.COLLECTOR_BASE_URL.rstrip("/")
         url = f"{base_url}/api/items"
 
@@ -85,110 +79,118 @@ async def ingest_collector(task_run_id: str | None = None) -> int:
         if settings.RSSHUB_ACCESS_KEY:
             headers["Authorization"] = f"Bearer {settings.RSSHUB_ACCESS_KEY}"
 
-        async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-            while True:
-                params: dict[str, str | int] = {"limit": limit, "offset": offset}
-                if last_fetched_at:
-                    # ISO 8601 string watermark
-                    params["since"] = last_fetched_at.isoformat()
+        enabled_sources = [
+            s.strip().lower()
+            for s in settings.ENABLED_COLLECTOR_SOURCES.split(",")
+            if s.strip()
+        ]
 
-                resp = await client.get(url, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-                items = data.get("items", [])
-                
-                if not items:
-                    break
+        articles = []
+        while True:
+            params: dict[str, str | int] = {"limit": limit, "offset": offset}
+            if last_fetched_at:
+                params["since"] = last_fetched_at.isoformat()
 
-                total_fetched += len(items)
+            resp = await client.get(url, params=params, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("items", [])
+            
+            if not items:
+                break
 
-                for item in items:
-                    raw_source_name = item.get("source_name") or "Collector"
-                    if enabled_sources and raw_source_name.strip().lower() not in enabled_sources:
-                        logger.info("Skipping disabled Collector source: %s", raw_source_name)
-                        continue
+            for item in items:
+                raw_source_name = item.get("source_name") or "Collector"
+                if enabled_sources and raw_source_name.strip().lower() not in enabled_sources:
+                    logger.info("Skipping disabled Collector source: %s", raw_source_name)
+                    continue
 
-                    item_url = item.get("url") or item.get("guid") or ""
-                    if not item_url:
-                        continue
+                item_url = item.get("url") or item.get("guid") or ""
+                if not item_url:
+                    continue
 
-                    url_hash = _hash_url(item_url)
+                url_hash = _hash_url(item_url)
+                title = item.get("title", "").strip()
+                if not title:
+                    continue
 
-                    # Check for duplicates
-                    existing = await session.execute(
-                        select(NewsArticle).where(NewsArticle.url_hash == url_hash)
-                    )
-                    if existing.scalar_one_or_none():
-                        continue
+                description = item.get("description") or ""
+                content = item.get("content") or description
 
-                    title = item.get("title", "").strip()
-                    if not title:
-                        continue
+                normalized_source_name = _normalize_source_name(raw_source_name)
+                language = _detect_language(item_url, raw_source_name)
 
-                    description = item.get("description") or ""
-                    content = item.get("content") or description
+                # Parse timestamps
+                published_at = None
+                published_str = item.get("published_at")
+                if published_str:
+                    try:
+                        published_at = datetime.fromisoformat(published_str.replace("Z", "+00:00"))
+                    except Exception:
+                        pass
 
-                    # Normalize source name & language
-                    raw_source_name = item.get("source_name") or "Collector"
-                    normalized_source_name = _normalize_source_name(raw_source_name)
-                    language = _detect_language(item_url, raw_source_name)
+                fetched_at = datetime.now(timezone.utc)
+                fetched_str = item.get("fetched_at")
+                if fetched_str:
+                    try:
+                        fetched_at = datetime.fromisoformat(fetched_str.replace("Z", "+00:00"))
+                    except Exception:
+                        pass
 
-                    # Parse timestamps
-                    published_at = None
-                    published_str = item.get("published_at")
-                    if published_str:
-                        try:
-                            published_at = datetime.fromisoformat(published_str.replace("Z", "+00:00"))
-                        except Exception:
-                            pass
-
-                    fetched_at = datetime.now(timezone.utc)
-                    fetched_str = item.get("fetched_at")
-                    if fetched_str:
-                        try:
-                            fetched_at = datetime.fromisoformat(fetched_str.replace("Z", "+00:00"))
-                        except Exception:
-                            pass
-
-                    article = NewsArticle(
-                        url=item_url,
-                        url_hash=url_hash,
-                        source_type=SourceTypeEnum.COLLECTOR,
-                        source_name=normalized_source_name,
-                        language=language,
-                        title=title,
-                        content=content[:50000] if content else None,
-                        content_hash=None,
-                        summary=description,
-                        published_at=published_at,
-                        fetched_at=fetched_at,
-                        extra={
-                            "collector_id": item.get("id"),
-                            "collector_source_id": item.get("source_id"),
-                            "author": item.get("author", ""),
-                            "categories": item.get("categories", []),
-                        },
-                        is_relevant=None,
-                    )
-                    session.add(article)
-                    total_saved += 1
-
-                await session.commit()
-
-                # If we received fewer items than the limit, we've reached the end
-                if len(items) < limit:
-                    break
-                offset += limit
-
-        if task_run_id:
-            try:
-                await session.execute(
-                    update(TaskRun)
-                    .where(TaskRun.id == task_run_id)
-                    .values(processed_count=total_saved, total_count=total_fetched)
+                article = NewsArticle(
+                    url=item_url,
+                    url_hash=url_hash,
+                    source_type=SourceTypeEnum.COLLECTOR,
+                    source_name=normalized_source_name,
+                    language=language,
+                    title=title,
+                    content=content[:50000] if content else None,
+                    content_hash=None,
+                    summary=description,
+                    published_at=published_at,
+                    fetched_at=fetched_at,
+                    extra={
+                        "collector_id": item.get("id"),
+                        "collector_source_id": item.get("source_id"),
+                        "author": item.get("author", ""),
+                        "categories": item.get("categories", []),
+                    },
+                    is_relevant=None,
                 )
-                await session.commit()
-            except Exception:
-                logger.exception("Failed to update TaskRun metrics for Collector sync")
+                articles.append(article)
 
-    return total_saved
+            if len(items) < limit:
+                break
+            offset += limit
+
+        return articles
+
+    async def filter_duplicates(self, items: Sequence[NewsArticle], session: AsyncSession) -> Sequence[NewsArticle]:
+        if not items:
+            return []
+
+        # Deduplicate the list itself by url_hash first
+        unique_fetched = {}
+        for item in items:
+            unique_fetched[item.url_hash] = item
+
+        url_hashes = list(unique_fetched.keys())
+        stmt = select(NewsArticle.url_hash).where(NewsArticle.url_hash.in_(url_hashes))
+        res = await session.execute(stmt)
+        existing_hashes = {row[0] for row in res.all()}
+
+        return [item for item in unique_fetched.values() if item.url_hash not in existing_hashes]
+
+
+# Register the adapter
+from src.ingest.pipeline import register_adapter
+register_adapter(IngestionSourceType.COLLECTOR, CollectorIngestAdapter())
+
+
+# Deprecated shim wrapper
+async def ingest_collector(task_run_id: str | None = None) -> int:
+    """Deprecated: use src.ingest.pipeline.ingest_source instead."""
+    from src.ingest.pipeline import ingest_source
+    summary = await ingest_source(IngestionSourceType.COLLECTOR, task_run_id)
+    return summary.saved_count
+

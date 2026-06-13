@@ -33,6 +33,12 @@ async def trigger_newsapi(background_tasks: BackgroundTasks) -> TriggerResponse:
 
 
 
+@router.post("/ingest/collector")
+async def trigger_collector(background_tasks: BackgroundTasks) -> TriggerResponse:
+    background_tasks.add_task(ingest_source, IngestionSourceType.COLLECTOR)
+    return TriggerResponse(job="ingest_collector", status="started")
+
+
 @router.post("/ingest/earnings")
 async def trigger_earnings(background_tasks: BackgroundTasks) -> TriggerResponse:
     background_tasks.add_task(ingest_yfinance_earnings)

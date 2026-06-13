@@ -37,9 +37,10 @@ async def _job_newsapi(task_run_id: str | None = None) -> None:
 
 async def _job_collector(task_run_id: str | None = None) -> None:
     logger.info("Starting Collector news ingestion")
-    from src.ingest.collector_fetcher import ingest_collector
-    count = await ingest_collector(task_run_id=task_run_id)
-    logger.info("Collector ingestion complete: %d articles saved", count)
+    from src.ingest.pipeline import ingest_source
+    from src.ingest.interface import IngestionSourceType
+    summary = await ingest_source(IngestionSourceType.COLLECTOR, task_run_id=task_run_id)
+    logger.info("Collector ingestion complete: %d articles saved", summary.saved_count)
 
 
 async def _job_earnings(task_run_id: str | None = None) -> None:
