@@ -17,117 +17,114 @@ logger = logging.getLogger("news-agent")
 NEWSAPI_BASE = "https://newsapi.org/v2"
 
 
-async def ingest_newsapi(task_run_id: str | None = None) -> int:
-    if not settings.NEWSAPI_KEY:
-        logger.warning("NEWSAPI_KEY not set, skipping NewsAPI ingestion")
-        return 0
+from typing import Sequence
+from src.ingest.interface import BaseIngestAdapter, IngestionSourceType
 
-    from sqlalchemy import update
-    from src.models.schema import TaskRun
-    total_saved = 0
-    total_fetched = 0
-    queries = [
-        ("en", "stock market OR earnings OR federal reserve OR economy OR cryptocurrency OR bitcoin OR ethereum"),
-        ("zh", "A股 OR 经济 OR 央行 OR 财报"),
-    ]
+class NewsApiIngestAdapter(BaseIngestAdapter):
+    async def fetch(self, client: httpx.AsyncClient, session: AsyncSession) -> Sequence[NewsArticle]:
+        if not settings.NEWSAPI_KEY:
+            logger.warning("NEWSAPI_KEY not set, skipping NewsAPI ingestion")
+            return []
 
-    async with async_session_factory() as session:
+        import hashlib
+        queries = [
+            ("en", "stock market OR earnings OR federal reserve OR economy OR cryptocurrency OR bitcoin OR ethereum"),
+            ("zh", "A股 OR 经济 OR 央行 OR 财报"),
+        ]
+        
+        articles = []
         for lang, query in queries:
             try:
-                count, fetched = await _fetch_newsapi(session, lang, query)
-                total_saved += count
-                total_fetched += fetched
+                url = f"{NEWSAPI_BASE}/everything"
+                params = {
+                    "q": query,
+                    "language": lang,
+                    "sortBy": "publishedAt",
+                    "pageSize": 100,
+                    "apiKey": settings.NEWSAPI_KEY,
+                }
+                if settings.NEWSAPI_DOMAINS:
+                    params["domains"] = settings.NEWSAPI_DOMAINS
+
+                resp = await client.get(url, params=params, timeout=30.0)
+                data = resp.json()
+
+                if data.get("status") != "ok":
+                    logger.error("NewsAPI error for lang=%s: %s", lang, data.get("message", "unknown"))
+                    continue
+
+                lang_articles = data.get("articles", [])
+                for art in lang_articles:
+                    article_url = art.get("url", "")
+                    if not article_url:
+                        continue
+
+                    url_hash = hashlib.sha256(article_url.encode()).hexdigest()
+                    title = art.get("title", "").strip()
+                    if not title or title == "[Removed]":
+                        continue
+
+                    description = art.get("description") or ""
+                    content = art.get("content") or description
+
+                    published_at = None
+                    published_str = art.get("publishedAt")
+                    if published_str:
+                        try:
+                            published_at = datetime.fromisoformat(published_str.replace("Z", "+00:00"))
+                        except Exception:
+                            pass
+
+                    language = LanguageEnum.ZH if lang == "zh" else LanguageEnum.EN
+
+                    article = NewsArticle(
+                        url=article_url,
+                        url_hash=url_hash,
+                        source_type=SourceTypeEnum.NEWSAPI,
+                        source_name=art.get("source", {}).get("name", "NewsAPI"),
+                        language=language,
+                        title=title,
+                        content=content[:50000] if content else None,
+                        content_hash=None,
+                        summary=description,
+                        published_at=published_at,
+                        extra={
+                            "author": art.get("author", ""),
+                            "image_url": art.get("urlToImage", ""),
+                        },
+                        is_relevant=None,
+                    )
+                    articles.append(article)
             except Exception:
-                logger.exception("Failed to ingest NewsAPI for lang=%s", lang)
+                logger.exception("Failed to fetch/parse NewsAPI for lang=%s", lang)
 
-        if task_run_id:
-            try:
-                await session.execute(
-                    update(TaskRun)
-                    .where(TaskRun.id == task_run_id)
-                    .values(processed_count=total_saved, total_count=total_fetched)
-                )
-                await session.commit()
-            except Exception:
-                logger.exception("Failed to update TaskRun metrics for NewsAPI fetch")
+        return articles
 
-    return total_saved
+    async def filter_duplicates(self, items: Sequence[NewsArticle], session: AsyncSession) -> Sequence[NewsArticle]:
+        if not items:
+            return []
+
+        # Deduplicate the list itself by url_hash first
+        unique_fetched = {}
+        for item in items:
+            unique_fetched[item.url_hash] = item
+
+        url_hashes = list(unique_fetched.keys())
+        stmt = select(NewsArticle.url_hash).where(NewsArticle.url_hash.in_(url_hashes))
+        res = await session.execute(stmt)
+        existing_hashes = {row[0] for row in res.all()}
+
+        return [item for item in unique_fetched.values() if item.url_hash not in existing_hashes]
 
 
-async def _fetch_newsapi(session: AsyncSession, lang: str, query: str) -> tuple[int, int]:
-    import hashlib
+# Register the adapter
+from src.ingest.pipeline import register_adapter
+register_adapter(IngestionSourceType.NEWSAPI, NewsApiIngestAdapter())
 
-    url = f"{NEWSAPI_BASE}/everything"
-    params = {
-        "q": query,
-        "language": lang,
-        "sortBy": "publishedAt",
-        "pageSize": 100,
-        "apiKey": settings.NEWSAPI_KEY,
-    }
-    if settings.NEWSAPI_DOMAINS:
-        params["domains"] = settings.NEWSAPI_DOMAINS
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(url, params=params, timeout=30.0)
-        data = resp.json()
-
-    if data.get("status") != "ok":
-        logger.error("NewsAPI error: %s", data.get("message", "unknown"))
-        return 0, 0
-
-    saved = 0
-    articles = data.get("articles", [])
-
-    for art in articles:
-        article_url = art.get("url", "")
-        if not article_url:
-            continue
-
-        url_hash = hashlib.sha256(article_url.encode()).hexdigest()
-
-        existing = await session.execute(
-            select(NewsArticle).where(NewsArticle.url_hash == url_hash)
-        )
-        if existing.scalar_one_or_none():
-            continue
-
-        title = art.get("title", "").strip()
-        if not title or title == "[Removed]":
-            continue
-
-        description = art.get("description") or ""
-        content = art.get("content") or description
-
-        published_at = None
-        published_str = art.get("publishedAt")
-        if published_str:
-            try:
-                published_at = datetime.fromisoformat(published_str.replace("Z", "+00:00"))
-            except Exception:
-                pass
-
-        language = LanguageEnum.ZH if lang == "zh" else LanguageEnum.EN
-
-        article = NewsArticle(
-            url=article_url,
-            url_hash=url_hash,
-            source_type=SourceTypeEnum.NEWSAPI,
-            source_name=art.get("source", {}).get("name", "NewsAPI"),
-            language=language,
-            title=title,
-            content=content[:50000] if content else None,
-            content_hash=None,
-            summary=description,
-            published_at=published_at,
-            extra={
-                "author": art.get("author", ""),
-                "image_url": art.get("urlToImage", ""),
-            },
-            is_relevant=None,
-        )
-        session.add(article)
-        saved += 1
-
-    await session.commit()
-    return saved, len(articles)
+# Deprecated shim wrapper
+async def ingest_newsapi(task_run_id: str | None = None) -> int:
+    """Deprecated: use src.ingest.pipeline.ingest_source instead."""
+    from src.ingest.pipeline import ingest_source
+    summary = await ingest_source(IngestionSourceType.NEWSAPI, task_run_id)
+    return summary.saved_count

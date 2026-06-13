@@ -1,8 +1,8 @@
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 
-from src.ingest.news_fetcher import ingest_rss
-from src.ingest.newsapi_fetcher import ingest_newsapi
+from src.ingest.pipeline import ingest_source
+from src.ingest.interface import IngestionSourceType
 from src.ingest.earnings_fetcher import ingest_yfinance_earnings
 from src.ingest.macro_fetcher import ingest_fred, ingest_akshare
 
@@ -20,13 +20,13 @@ class TriggerResponse(BaseModel):
 
 @router.post("/ingest/rss")
 async def trigger_rss(background_tasks: BackgroundTasks) -> TriggerResponse:
-    background_tasks.add_task(ingest_rss)
+    background_tasks.add_task(ingest_source, IngestionSourceType.RSS)
     return TriggerResponse(job="ingest_rss", status="started")
 
 
 @router.post("/ingest/newsapi")
 async def trigger_newsapi(background_tasks: BackgroundTasks) -> TriggerResponse:
-    background_tasks.add_task(ingest_newsapi)
+    background_tasks.add_task(ingest_source, IngestionSourceType.NEWSAPI)
     return TriggerResponse(job="ingest_newsapi", status="started")
 
 

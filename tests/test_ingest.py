@@ -8,7 +8,7 @@ from src.models.schema import NewsArticle, LanguageEnum
 async def test_ingest_rss_irrelevant() -> None:
     # Arrange
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
     mock_session.commit = AsyncMock()
     
@@ -39,12 +39,12 @@ async def test_ingest_rss_irrelevant() -> None:
     mock_feed.entries = [mock_entry]
 
     with (
-        patch("src.ingest.news_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.news_fetcher.get_rss_feeds", return_value=mock_rss_feeds),
         patch("src.ingest.news_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response),
         patch("feedparser.parse", return_value=mock_feed),
-        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_settings.ENABLED_RSS_FEEDS = "Test English Feed"
         
@@ -70,7 +70,7 @@ async def test_ingest_rss_irrelevant() -> None:
 async def test_ingest_rss_relevant() -> None:
     # Arrange
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
     mock_session.commit = AsyncMock()
     
@@ -101,12 +101,12 @@ async def test_ingest_rss_relevant() -> None:
     mock_feed.entries = [mock_entry]
 
     with (
-        patch("src.ingest.news_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.news_fetcher.get_rss_feeds", return_value=mock_rss_feeds),
         patch("src.ingest.news_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response),
         patch("feedparser.parse", return_value=mock_feed),
-        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_settings.ENABLED_RSS_FEEDS = "Test English Feed"
         
@@ -132,7 +132,7 @@ async def test_ingest_rss_relevant() -> None:
 async def test_ingest_newsapi_irrelevant() -> None:
     # Arrange
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
     mock_session.commit = AsyncMock()
     
@@ -141,25 +141,40 @@ async def test_ingest_newsapi_irrelevant() -> None:
     mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
 
     mock_response = MagicMock()
-    mock_response.json = MagicMock(return_value={
-        "status": "ok",
-        "articles": [
-            {
-                "url": "https://newsapi.com/article_irrelevant",
-                "title": "Irrelevant Political Debates",
-                "description": "General discussions about election polls.",
-                "content": "Full content preview here...",
-                "publishedAt": "2026-06-06T12:00:00Z",
-                "source": {"name": "CNN"}
-            }
-        ]
-    })
+    mock_response.json = MagicMock(side_effect=[
+        {
+            "status": "ok",
+            "articles": [
+                {
+                    "url": "https://newsapi.com/article_irrelevant_1",
+                    "title": "Irrelevant Political Debates",
+                    "description": "General discussions about election polls.",
+                    "content": "Full content preview here...",
+                    "publishedAt": "2026-06-06T12:00:00Z",
+                    "source": {"name": "CNN"}
+                }
+            ]
+        },
+        {
+            "status": "ok",
+            "articles": [
+                {
+                    "url": "https://newsapi.com/article_irrelevant_2",
+                    "title": "Irrelevant Political Debates",
+                    "description": "General discussions about election polls.",
+                    "content": "Full content preview here...",
+                    "publishedAt": "2026-06-06T12:00:00Z",
+                    "source": {"name": "CNN"}
+                }
+            ]
+        }
+    ])
     
     with (
-        patch("src.ingest.newsapi_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.newsapi_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response),
-        patch("src.ingest.newsapi_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.newsapi_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_settings.NEWSAPI_KEY = "test_key"
         
@@ -184,7 +199,7 @@ async def test_ingest_newsapi_irrelevant() -> None:
 async def test_ingest_newsapi_relevant() -> None:
     # Arrange
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
     mock_session.commit = AsyncMock()
     
@@ -193,25 +208,40 @@ async def test_ingest_newsapi_relevant() -> None:
     mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
 
     mock_response = MagicMock()
-    mock_response.json = MagicMock(return_value={
-        "status": "ok",
-        "articles": [
-            {
-                "url": "https://newsapi.com/article_relevant",
-                "title": "Fed Hikes Interest Rates",
-                "description": "The Federal Reserve raised interest rates by 25 basis points.",
-                "content": "Full content preview here...",
-                "publishedAt": "2026-06-06T12:00:00Z",
-                "source": {"name": "Bloomberg"}
-            }
-        ]
-    })
+    mock_response.json = MagicMock(side_effect=[
+        {
+            "status": "ok",
+            "articles": [
+                {
+                    "url": "https://newsapi.com/article_relevant_1",
+                    "title": "Fed Hikes Interest Rates",
+                    "description": "The Federal Reserve raised interest rates by 25 basis points.",
+                    "content": "Full content preview here...",
+                    "publishedAt": "2026-06-06T12:00:00Z",
+                    "source": {"name": "Bloomberg"}
+                }
+            ]
+        },
+        {
+            "status": "ok",
+            "articles": [
+                {
+                    "url": "https://newsapi.com/article_relevant_2",
+                    "title": "Fed Hikes Interest Rates",
+                    "description": "The Federal Reserve raised interest rates by 25 basis points.",
+                    "content": "Full content preview here...",
+                    "publishedAt": "2026-06-06T12:00:00Z",
+                    "source": {"name": "Bloomberg"}
+                }
+            ]
+        }
+    ])
     
     with (
-        patch("src.ingest.newsapi_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.newsapi_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response),
-        patch("src.ingest.newsapi_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.newsapi_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_settings.NEWSAPI_KEY = "test_key"
         
@@ -244,8 +274,9 @@ async def test_ingest_skips_existing_url_hash() -> None:
     )
     
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=existing_article)
+    mock_session.execute.return_value.all.return_value = [("3700a410574bbe2d8cfbf8f2d200146506ed78a66850f41d73e171e89e9e5e1a",)]
     mock_session.commit = AsyncMock()
     
     mock_session_factory = MagicMock()
@@ -290,12 +321,12 @@ async def test_ingest_skips_existing_url_hash() -> None:
 
     # Test RSS skipping
     with (
-        patch("src.ingest.news_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.news_fetcher.get_rss_feeds", return_value=mock_rss_feeds),
         patch("src.ingest.news_fetcher.settings") as mock_settings_rss,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response_rss),
         patch("feedparser.parse", return_value=mock_feed_rss),
-        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock) as mock_check_rss,
+        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check_rss,
     ):
         mock_settings_rss.ENABLED_RSS_FEEDS = "Test English Feed"
         saved_count = await ingest_rss()
@@ -308,10 +339,10 @@ async def test_ingest_skips_existing_url_hash() -> None:
 
     # Test NewsAPI skipping
     with (
-        patch("src.ingest.newsapi_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.newsapi_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response_newsapi),
-        patch("src.ingest.newsapi_fetcher.check_relevance", new_callable=AsyncMock) as mock_check_newsapi,
+        patch("src.ingest.newsapi_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check_newsapi,
     ):
         mock_settings.NEWSAPI_KEY = "test_key"
         saved_count = await ingest_newsapi()
@@ -323,7 +354,7 @@ async def test_ingest_skips_existing_url_hash() -> None:
 @pytest.mark.asyncio
 async def test_ingest_rss_filtering_by_enabled_feeds() -> None:
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
     mock_session.commit = AsyncMock()
     
@@ -357,12 +388,12 @@ async def test_ingest_rss_filtering_by_enabled_feeds() -> None:
     mock_feed.entries = [mock_entry]
 
     with (
-        patch("src.ingest.news_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.news_fetcher.get_rss_feeds", return_value=mock_rss_feeds),
         patch("src.ingest.news_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response),
         patch("feedparser.parse", return_value=mock_feed),
-        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_settings.ENABLED_RSS_FEEDS = "EnabledFeed"
         
@@ -378,7 +409,7 @@ async def test_ingest_rss_filtering_by_enabled_feeds() -> None:
 @pytest.mark.asyncio
 async def test_ingest_newsapi_filtering_by_domains() -> None:
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
     mock_session.commit = AsyncMock()
     
@@ -390,7 +421,7 @@ async def test_ingest_newsapi_filtering_by_domains() -> None:
     mock_response.json = MagicMock(return_value={"status": "ok", "articles": []})
     
     with (
-        patch("src.ingest.newsapi_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.newsapi_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response) as mock_http_get,
     ):
@@ -412,7 +443,7 @@ async def test_ingest_akshare_cpi_ppi_parsing() -> None:
     import pandas as pd
     
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
     mock_session.commit = AsyncMock()
     
@@ -472,7 +503,7 @@ async def test_ingest_fred_pmi() -> None:
     import pandas as pd
     
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
     mock_session.commit = AsyncMock()
     
@@ -521,7 +552,7 @@ async def test_ingest_fred_pmi() -> None:
 @pytest.mark.asyncio
 async def test_ingest_rss_custom_feed() -> None:
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
     mock_session.commit = AsyncMock()
     
@@ -548,11 +579,11 @@ async def test_ingest_rss_custom_feed() -> None:
     mock_feed.entries = [mock_entry]
 
     with (
-        patch("src.ingest.news_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.news_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response) as mock_http_get,
         patch("feedparser.parse", return_value=mock_feed),
-        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         # Configure settings to have a custom feed
         mock_settings.CUSTOM_RSS_FEEDS = '[{"name": "CustomFeed", "url": "https://customfeed.com/rss", "category": "finance", "language": "en"}]'
@@ -577,12 +608,15 @@ async def test_ingest_rss_custom_feed() -> None:
 @pytest.mark.asyncio
 async def test_ingest_rss_deleted_predefined_feed() -> None:
     mock_session = MagicMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
     mock_session_factory = MagicMock()
     mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
 
     with (
-        patch("src.ingest.news_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.news_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_http_get,
     ):
@@ -602,9 +636,11 @@ async def test_ingest_rss_deleted_predefined_feed() -> None:
 @pytest.mark.asyncio
 async def test_ingest_rss_updates_task_run() -> None:
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
+    mock_session.execute.return_value.scalar.return_value = "running"
     mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
 
     mock_session_factory = MagicMock()
     mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -633,12 +669,12 @@ async def test_ingest_rss_updates_task_run() -> None:
     mock_feed.entries = [mock_entry]
 
     with (
-        patch("src.ingest.news_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.news_fetcher.get_rss_feeds", return_value=mock_rss_feeds),
         patch("src.ingest.news_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response),
         patch("feedparser.parse", return_value=mock_feed),
-        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.news_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_settings.ENABLED_RSS_FEEDS = "Test English Feed"
         mock_settings.DELETED_RSS_FEEDS = ""
@@ -667,34 +703,51 @@ async def test_ingest_rss_updates_task_run() -> None:
 @pytest.mark.asyncio
 async def test_ingest_newsapi_updates_task_run() -> None:
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=MagicMock())
     mock_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
+    mock_session.execute.return_value.scalar.return_value = "running"
     mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
 
     mock_session_factory = MagicMock()
     mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
 
     mock_response = MagicMock()
-    mock_response.json = MagicMock(return_value={
-        "status": "ok",
-        "articles": [
-            {
-                "url": "https://newsapi.com/article_relevant",
-                "title": "Fed Hikes Interest Rates",
-                "description": "The Federal Reserve raised interest rates by 25 basis points.",
-                "content": "Full content preview here...",
-                "publishedAt": "2026-06-06T12:00:00Z",
-                "source": {"name": "Bloomberg"}
-            }
-        ]
-    })
+    mock_response.json = MagicMock(side_effect=[
+        {
+            "status": "ok",
+            "articles": [
+                {
+                    "url": "https://newsapi.com/article_relevant_1",
+                    "title": "Fed Hikes Interest Rates",
+                    "description": "The Federal Reserve raised interest rates by 25 basis points.",
+                    "content": "Full content preview here...",
+                    "publishedAt": "2026-06-06T12:00:00Z",
+                    "source": {"name": "Bloomberg"}
+                }
+            ]
+        },
+        {
+            "status": "ok",
+            "articles": [
+                {
+                    "url": "https://newsapi.com/article_relevant_2",
+                    "title": "Fed Hikes Interest Rates",
+                    "description": "The Federal Reserve raised interest rates by 25 basis points.",
+                    "content": "Full content preview here...",
+                    "publishedAt": "2026-06-06T12:00:00Z",
+                    "source": {"name": "Bloomberg"}
+                }
+            ]
+        }
+    ])
 
     with (
-        patch("src.ingest.newsapi_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.newsapi_fetcher.settings") as mock_settings,
         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response),
-        patch("src.ingest.newsapi_fetcher.check_relevance", new_callable=AsyncMock) as mock_check,
+        patch("src.ingest.newsapi_fetcher.check_relevance", new_callable=AsyncMock, create=True) as mock_check,
     ):
         mock_settings.NEWSAPI_KEY = "test_key"
         mock_settings.NEWSAPI_DOMAINS = ""

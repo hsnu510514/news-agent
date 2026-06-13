@@ -21,16 +21,18 @@ scheduler = AsyncIOScheduler()
 
 async def _job_rss_news(task_run_id: str | None = None) -> None:
     logger.info("Starting RSS news ingestion")
-    from src.ingest.news_fetcher import ingest_rss
-    count = await ingest_rss(task_run_id=task_run_id)
-    logger.info("RSS ingestion complete: %d articles saved", count)
+    from src.ingest.pipeline import ingest_source
+    from src.ingest.interface import IngestionSourceType
+    summary = await ingest_source(IngestionSourceType.RSS, task_run_id=task_run_id)
+    logger.info("RSS ingestion complete: %d articles saved", summary.saved_count)
 
 
 async def _job_newsapi(task_run_id: str | None = None) -> None:
     logger.info("Starting NewsAPI ingestion")
-    from src.ingest.newsapi_fetcher import ingest_newsapi
-    count = await ingest_newsapi(task_run_id=task_run_id)
-    logger.info("NewsAPI ingestion complete: %d articles saved", count)
+    from src.ingest.pipeline import ingest_source
+    from src.ingest.interface import IngestionSourceType
+    summary = await ingest_source(IngestionSourceType.NEWSAPI, task_run_id=task_run_id)
+    logger.info("NewsAPI ingestion complete: %d articles saved", summary.saved_count)
 
 
 async def _job_collector(task_run_id: str | None = None) -> None:

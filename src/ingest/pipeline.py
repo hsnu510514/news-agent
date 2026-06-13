@@ -14,6 +14,15 @@ logger = logging.getLogger("news-agent")
 _registry: Dict[IngestionSourceType, BaseIngestAdapter] = {}
 
 
+def _lazy_load_adapters() -> None:
+    try:
+        import src.ingest.news_fetcher
+        import src.ingest.newsapi_fetcher
+        # collector, earnings, and macro will be added as we migrate them
+    except ImportError:
+        logger.exception("Failed to lazy load adapters")
+
+
 def register_adapter(source_type: IngestionSourceType, adapter: BaseIngestAdapter) -> None:
     """Registers a concrete adapter instance for the specified source type."""
     _registry[source_type] = adapter
@@ -22,6 +31,8 @@ def register_adapter(source_type: IngestionSourceType, adapter: BaseIngestAdapte
 
 def get_adapter(source_type: IngestionSourceType) -> BaseIngestAdapter:
     """Retrieves the adapter for the source type, raising KeyError if not found."""
+    if source_type not in _registry:
+        _lazy_load_adapters()
     return _registry[source_type]
 
 
