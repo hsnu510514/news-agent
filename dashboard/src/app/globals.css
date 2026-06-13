@@ -128,3 +128,26 @@
     @apply font-sans;
   }
 }
+
+@keyframes loading-slide {
+  0% {
+    left: -35%;
+    right: 100%;
+  }
+  60% {
+    left: 100%;
+    right: -90%;
+  }
+  100% {
+    left: 100%;
+    right: -90%;
+  }
+}
+
+.animate-loading-slide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 35%;
+  animation: loading-slide 1.6s infinite ease-in-out;
+}

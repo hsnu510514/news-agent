@@ -1,4 +1,4 @@
-from src.api.routes import news, analysis, earnings, macro, market_wire, trigger, scheduler, insights, briefings, glossary, tasks
+from src.api.routes import news, analysis, earnings, macro, trigger, scheduler, insights, briefings, glossary, tasks, system
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,13 +26,14 @@ app.include_router(news.router, prefix="/api/news", tags=["News"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
 app.include_router(earnings.router, prefix="/api/earnings", tags=["Earnings"])
 app.include_router(macro.router, prefix="/api/macro", tags=["Macro"])
-app.include_router(market_wire.router, prefix="/api/market-wire", tags=["Market Wire"])
+
 app.include_router(trigger.router, prefix="/api/trigger", tags=["Triggers"])
 app.include_router(scheduler.router, prefix="/api/scheduler", tags=["Scheduler"])
 app.include_router(insights.router, prefix="/api/insights", tags=["Insights"])
 app.include_router(briefings.router, prefix="/api/briefings", tags=["Daily Briefings"])
 app.include_router(glossary.router, prefix="/api/glossary", tags=["Entity Glossary"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Task Executions"])
+app.include_router(system.router, prefix="/api/system", tags=["System Status"])
 
 
 
@@ -80,6 +81,9 @@ async def get_alerts_endpoint(
 
 @app.on_event("startup")
 async def startup() -> None:
+    from src.core.config import load_model_settings
+    load_model_settings()
+
     from src.storage.database import init_db
     from src.storage.vectorstore import ensure_collection
     from src.scheduler.jobs import start_scheduler

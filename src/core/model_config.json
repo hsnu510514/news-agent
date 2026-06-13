@@ -1,0 +1,19 @@
+{
+    "LLM_CLASSIFY_MODEL": "deepseek/deepseek-v4-flash",
+    "LLM_SUMMARIZE_MODEL": "ollama/gemma4:12b",
+    "LLM_ANALYSIS_MODEL": "deepseek/deepseek-v4-flash",
+    "LLM_RELEVANCE_MODEL": "ollama/gemma4:12b",
+    "LLM_EMBED_MODEL": "ollama/nomic-embed-text",
+    "LLM_EMBED_FALLBACK_MODEL": "ollama/nomic-embed-text",
+    "LLM_LIGHTWEIGHT_FALLBACK_MODEL": "ollama/gemma4:12b",
+    "LLM_REASONING_FALLBACK_MODEL": "ollama/gemma4:12b",
+    "DAILY_SPEND_LIMIT": 5.0,
+    "LLM_PACING_DELAY": "auto",
+    "NEWSAPI_DOMAINS": "bloomberg.com",
+    "ENABLED_RSS_FEEDS": "FT Markets",
+    "MAX_ANALYSIS_DURATION_MINUTES": 25,
+    "ANALYSIS_BATCH_SIZE": 20,
+    "CUSTOM_RSS_FEEDS": "[]",
+    "DELETED_RSS_FEEDS": "36kr,bloomberg",
+    "ENABLED_COLLECTOR_SOURCES": "Bloomberg Business,\u89c1\u95fb-24h\u70ed\u95e8,Bloomberg Markets,\u89c1\u95fb-A\u80a1\u8d44\u8baf,\u89c1\u95fb-\u5168\u7403\u5b8f\u89c2,Bloomberg Politics,Reuters Business,\u89c1\u95fb-\u7f8e\u80a1\u8d44\u8baf,Reuters World,\u8d22\u65b0-\u6570\u636e\u901a,\u8d22\u65b0-\u9996\u9875\u65b0\u95fb"
+}

@@ -30,3 +30,6 @@ dashboard/out/
 
 # Docker
 docker-data/
+
+# Scratch
+scratch/

@@ -38,6 +38,7 @@ async def test_process_article_sequentially_new() -> None:
         mock_glossary.return_value = ""
         mock_classify.return_value = """{
             "action": "NEW",
+            "translated_title": "英伟达Blackwell GPU延迟3个月",
             "subject_name": "NVDA",
             "subject_type": "ticker",
             "dimension_name": "Blackwell Delays",
@@ -63,6 +64,7 @@ async def test_process_article_sequentially_new() -> None:
         assert mock_search.called
         assert mock_classify.called
         assert mock_register.called
+        assert article.title_zh == "英伟达Blackwell GPU延迟3个月"
 
         # Verify session added expected objects
         added_objs = [call.args[0] for call in session.add.call_args_list]
@@ -243,7 +245,10 @@ async def test_run_analysis_pipeline_batch() -> None:
     mock_session.execute = AsyncMock()
     
     mock_execute_result = MagicMock()
-    mock_execute_result.scalars.return_value.all.return_value = [article1, article2]
+    mock_execute_result.scalars.return_value.all.side_effect = [
+        [article1, article2],
+        []
+    ]
     mock_session.execute.return_value = mock_execute_result
     mock_session.commit = AsyncMock()
 
@@ -259,7 +264,7 @@ async def test_run_analysis_pipeline_batch() -> None:
         stats = await run_analysis_pipeline(batch_size=20)
 
         # Assert
-        assert stats == {"analyzed": 2, "failed": 0, "skipped": 0}
+        assert stats == {"analyzed": 2, "failed": 0, "skipped": 0, "status": "success"}
         assert mock_process.call_count == 2
         mock_process.assert_any_call(article1, mock_session)
         mock_process.assert_any_call(article2, mock_session)

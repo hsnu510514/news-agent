@@ -46,12 +46,12 @@ class UrgencyEnum(enum.StrEnum):
 class SourceTypeEnum(enum.StrEnum):
     RSS = "rss"
     NEWSAPI = "newsapi"
-    JIN10 = "jin10"
     FUTU = "futu"
     EDGAR = "edgar"
     FRED = "fred"
     AKSHARE = "akshare"
     YFINANCE = "yfinance"
+    COLLECTOR = "collector"
 
 
 def _uuid() -> str:
@@ -77,7 +77,7 @@ class NewsArticle(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     extra: Mapped[dict | None] = mapped_column(JSONB)
-    is_relevant: Mapped[bool | None] = mapped_column(Boolean, default=True)
+    is_relevant: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     duplicate_of_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("news_articles.id", ondelete="SET NULL"), index=True
     )
@@ -163,23 +163,7 @@ class AnalysisResult(Base):
     article = relationship("NewsArticle", backref="analysis")
 
 
-class MarketWire(Base):
-    __tablename__ = "market_wires"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    source_type: Mapped[SourceTypeEnum] = mapped_column(Enum(SourceTypeEnum), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    content_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
-    language: Mapped[LanguageEnum] = mapped_column(Enum(LanguageEnum), nullable=False)
-    importance: Mapped[int] = mapped_column(Integer, default=0)
-    related_symbols: Mapped[list | None] = mapped_column(JSONB)
-    extra: Mapped[dict | None] = mapped_column(JSONB)
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    fetched_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-
-    __table_args__ = (Index("ix_market_wire_published", "published_at", "importance"),)
 
 
 class JobConfig(Base):
@@ -193,6 +177,9 @@ class JobConfig(Base):
     last_run_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_run_status: Mapped[str | None] = mapped_column(String(20))  # "success" or "failed"
     last_run_message: Mapped[str | None] = mapped_column(Text)
+    volume_threshold: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cooldown_minutes: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+
 
 
 class SubjectTypeEnum(enum.StrEnum):
@@ -293,3 +280,24 @@ class TaskRun(Base):
     failed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     message: Mapped[str | None] = mapped_column(Text)
+
+
+class PotentialDuplicate(Base):
+    __tablename__ = "potential_duplicates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    entity_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "subject" or "insight"
+    id1: Mapped[str] = mapped_column(String(36), nullable=False)
+    id2: Mapped[str] = mapped_column(String(36), nullable=False)
+    similarity: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)  # "pending", "ignored", "merged"
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("entity_type", "id1", "id2", name="uq_potential_duplicate_pair"),
+    )

@@ -5,7 +5,7 @@ import useSWR from "swr";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Database, TrendingUp, TrendingDown, Minus, Clock, Globe } from "lucide-react";
+import { Database, TrendingUp, TrendingDown, Minus, Clock, Globe, ChevronDown } from "lucide-react";
 import { getUrgencyBadge, type InsightItem } from "@/lib/api";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -16,13 +16,29 @@ const fetcher = async (url: string) => {
 };
 
 export default function InsightsPage() {
-  const { data, error } = useSWR(`${API}/api/insights`, fetcher);
-  const items: InsightItem[] = data?.items ?? [];
-
   const [expandedInsights, setExpandedInsights] = useState<string[]>([]);
   const [briefingLang, setBriefingLang] = useState<"en" | "zh">("en");
   const [typeFilter, setTypeFilter] = useState<string>("");
+  const [subCategoryFilter, setSubCategoryFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [offset, setOffset] = useState<number>(0);
+  const limit = 20;
+
+  // Construct server-side query URL
+  let swrUrl = `${API}/api/insights?offset=${offset}&limit=${limit}`;
+  if (typeFilter) swrUrl += `&subject_type=${typeFilter}`;
+  if (subCategoryFilter) swrUrl += `&tag=${subCategoryFilter}`;
+  if (searchQuery.trim()) swrUrl += `&q=${encodeURIComponent(searchQuery.trim())}`;
+
+  const { data, error } = useSWR(swrUrl, fetcher);
+  const items: InsightItem[] = data?.items ?? [];
+
+  // Fetch top tags for cascade dropdown
+  const { data: tagsData } = useSWR(
+    typeFilter ? `${API}/api/insights/top-tags?subject_type=${typeFilter}` : null,
+    fetcher
+  );
+  const topTags: string[] = tagsData?.tags ?? [];
 
   const toggleExpand = (id: string) => {
     if (expandedInsights.includes(id)) {
@@ -32,19 +48,7 @@ export default function InsightsPage() {
     }
   };
 
-  const filteredItems = items.filter((item) => {
-    // Subject Type filter
-    if (typeFilter && item.subject.type !== typeFilter) return false;
-    // Subject Name / Dimension search
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const nameMatch = item.subject.name.toLowerCase().includes(q);
-      const dimMatch = item.dimension_name.toLowerCase().includes(q);
-      const tagMatch = item.tags?.some((t) => t.toLowerCase().includes(q)) ?? false;
-      return nameMatch || dimMatch || tagMatch;
-    }
-    return true;
-  });
+  const filteredItems = items;
 
   const getSentimentBadge = (sentiment: string) => {
     switch (sentiment) {
@@ -89,47 +93,76 @@ export default function InsightsPage() {
           <Input
             placeholder="Search subjects..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setOffset(0);
+            }}
             className="max-w-[200px] h-9 text-xs"
           />
-          <select
-            value={typeFilter}
-            aria-label="filter-type"
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
-          >
-            <option value="">All Types</option>
-            <option value="ticker">Ticker / 股票代码</option>
-            <option value="macro">Macro / 宏观</option>
-            <option value="theme">Theme / 主题</option>
-          </select>
+          <div className="relative w-[160px]">
+            <select
+              value={typeFilter}
+              aria-label="filter-type"
+              onChange={(e) => {
+                setTypeFilter(e.target.value);
+                setSubCategoryFilter("");
+                setOffset(0);
+              }}
+              className="w-full h-9 rounded-lg border border-input bg-background pl-2.5 pr-8 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer appearance-none dark:bg-input/30 dark:hover:bg-input/50"
+            >
+              <option value="">All Types</option>
+              <option value="ticker">Ticker / 股票代码</option>
+              <option value="macro">Macro / 宏观</option>
+              <option value="theme">Theme / 主题</option>
+            </select>
+            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none text-muted-foreground" />
+          </div>
 
-          {items.length > 0 && (
-            <div className="flex items-center gap-1 p-0.5 rounded-lg border border-border bg-muted/40 h-9">
-              <button
-                onClick={() => setBriefingLang("en")}
-                aria-label="switch-lang-en"
-                className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all cursor-pointer ${
-                  briefingLang === "en"
-                    ? "bg-background text-foreground shadow-sm font-bold"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                EN
-              </button>
-              <button
-                onClick={() => setBriefingLang("zh")}
-                aria-label="switch-lang-zh"
-                className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all cursor-pointer ${
-                  briefingLang === "zh"
-                    ? "bg-background text-foreground shadow-sm font-bold"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                中
-              </button>
-            </div>
-          )}
+          <div className="relative w-[160px]">
+            <select
+              value={subCategoryFilter}
+              aria-label="filter-sub-category"
+              disabled={!typeFilter}
+              onChange={(e) => {
+                setSubCategoryFilter(e.target.value);
+                setOffset(0);
+              }}
+              className="w-full h-9 rounded-lg border border-input bg-background pl-2.5 pr-8 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer appearance-none disabled:opacity-50 disabled:cursor-not-allowed dark:bg-input/30 dark:hover:bg-input/50"
+            >
+              <option value="">All Tags</option>
+              {topTags.map((tag) => (
+                <option key={tag} value={tag}>
+                  {tag}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className={`absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none text-muted-foreground transition-opacity ${!typeFilter ? "opacity-50" : ""}`} />
+          </div>
+
+          <div className="flex items-center gap-1 p-0.5 rounded-lg border border-border bg-muted/40 h-9">
+            <button
+              onClick={() => setBriefingLang("en")}
+              aria-label="switch-lang-en"
+              className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all cursor-pointer ${
+                briefingLang === "en"
+                  ? "bg-background text-foreground shadow-sm font-bold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              EN
+            </button>
+            <button
+              onClick={() => setBriefingLang("zh")}
+              aria-label="switch-lang-zh"
+              className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all cursor-pointer ${
+                briefingLang === "zh"
+                  ? "bg-background text-foreground shadow-sm font-bold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              中
+            </button>
+          </div>
         </div>
       </div>
 
@@ -247,6 +280,29 @@ export default function InsightsPage() {
             No insights found matching your search criteria.
           </div>
         )}
+      </div>
+
+      {/* Pagination controls */}
+      <div className="flex justify-between items-center pt-4 border-t border-border/40">
+        <button
+          onClick={() => setOffset(Math.max(0, offset - limit))}
+          disabled={offset === 0}
+          aria-label="previous-page"
+          className="inline-flex items-center justify-center rounded-md border border-input bg-background h-9 px-4 text-xs font-semibold hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer shadow-sm"
+        >
+          Previous Page / 上一页
+        </button>
+        <span className="text-xs font-medium text-muted-foreground">
+          Page {Math.floor(offset / limit) + 1}
+        </span>
+        <button
+          onClick={() => setOffset(offset + limit)}
+          disabled={filteredItems.length < limit}
+          aria-label="next-page"
+          className="inline-flex items-center justify-center rounded-md border border-input bg-background h-9 px-4 text-xs font-semibold hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer shadow-sm"
+        >
+          Next Page / 下一页
+        </button>
       </div>
     </div>
   );

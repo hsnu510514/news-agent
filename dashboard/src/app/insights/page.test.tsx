@@ -167,4 +167,102 @@ describe("Insight Vault Page - Slice 5", () => {
     });
     expect(screen.getByText("Tesla (TSLA)")).toBeInTheDocument();
   });
+
+  it("renders a cascade tag filter when a subject type is selected", async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes("/api/insights/top-tags")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ tags: ["Semiconductors", "AI"] }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(mockInsights),
+      });
+    });
+
+    render(
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <InsightsPage />
+      </SWRConfig>
+    );
+
+    // Initial load
+    expect(await screen.findByText("Tesla (TSLA)")).toBeInTheDocument();
+
+    // Select subject type: ticker
+    const typeSelect = screen.getByRole("combobox", { name: /filter-type/i });
+    fireEvent.change(typeSelect, { target: { value: "ticker" } });
+
+    // The sub-category select should appear and contain "Semiconductors" and "AI"
+    const subCategorySelect = await screen.findByRole("combobox", { name: /filter-sub-category/i });
+    expect(subCategorySelect).toBeInTheDocument();
+    expect(screen.getByText("Semiconductors")).toBeInTheDocument();
+    expect(screen.getByText("AI")).toBeInTheDocument();
+
+    // Choose sub-category tag "Semiconductors"
+    fireEvent.change(subCategorySelect, { target: { value: "Semiconductors" } });
+
+    // Since mockInsights has no elements with tag "Semiconductors", it should filter them out
+    await waitFor(() => {
+      expect(screen.getByText(/No insights found matching/i)).toBeInTheDocument();
+    });
+  });
+
+  it("queries the API with search, filters, and pagination parameters", async () => {
+    const twentyMockInsights = {
+      items: Array.from({ length: 20 }, (_, i) => ({
+        id: `insight-${i}`,
+        dimension_name: `Dimension ${i}`,
+        summary_en: `Summary ${i}`,
+        summary_zh: `Summary ZH ${i}`,
+        urgency: "medium",
+        sentiment: "neutral",
+        tags: [],
+        last_updated_at: "2026-06-07T09:00:00Z",
+        subject: {
+          id: `subj-${i}`,
+          name: `Subject ${i}`,
+          type: "ticker",
+          tags: [],
+        },
+        facts: [],
+      })),
+    };
+
+    mockFetch.mockImplementation(() => {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(twentyMockInsights),
+      });
+    });
+
+    render(
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <InsightsPage />
+      </SWRConfig>
+    );
+
+    // Initial load: fetch should be called with default offset=0 and limit=20
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/insights?offset=0&limit=20")
+      );
+    });
+
+    // Check pagination buttons are rendered
+    const nextButton = screen.getByRole("button", { name: /next-page/i });
+    expect(nextButton).toBeInTheDocument();
+
+    // Click Next
+    fireEvent.click(nextButton);
+
+    // Fetch should be called with offset=20
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/insights?offset=20&limit=20")
+      );
+    });
+  });
 });

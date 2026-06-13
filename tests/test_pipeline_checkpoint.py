@@ -15,8 +15,9 @@ async def test_run_analysis_pipeline_concurrency_lock():
     mock_session.commit = AsyncMock()
     
     mock_execute_result = MagicMock()
-    mock_execute_result.scalars.return_value.all.return_value = [
-        NewsArticle(id="art-1", title="Art 1", content="Content", published_at=datetime.now(timezone.utc), is_relevant=True)
+    mock_execute_result.scalars.return_value.all.side_effect = [
+        [NewsArticle(id="art-1", title="Art 1", content="Content", published_at=datetime.now(timezone.utc), is_relevant=True)],
+        []
     ]
     mock_session.execute.return_value = mock_execute_result
 
@@ -45,7 +46,7 @@ async def test_run_analysis_pipeline_concurrency_lock():
         stats1 = await task1
         
         # Assert: the second run should have skipped execution
-        assert stats1 == {"analyzed": 1, "failed": 0, "skipped": 0}
+        assert stats1 == {"analyzed": 1, "failed": 0, "skipped": 0, "status": "success"}
         assert stats2 == {"analyzed": 0, "failed": 0, "skipped": 0, "reason": "already_running"}
 
 
@@ -60,7 +61,10 @@ async def test_run_analysis_pipeline_checkpoint_commits():
     mock_session.execute = AsyncMock()
     
     mock_execute_result = MagicMock()
-    mock_execute_result.scalars.return_value.all.return_value = [art1, art2, art3]
+    mock_execute_result.scalars.return_value.all.side_effect = [
+        [art1, art2, art3],
+        []
+    ]
     mock_session.execute.return_value = mock_execute_result
     
     # Track commits
@@ -84,7 +88,7 @@ async def test_run_analysis_pipeline_checkpoint_commits():
         stats = await run_analysis_pipeline(batch_size=20)
         
         # Assert
-        assert stats == {"analyzed": 2, "failed": 1, "skipped": 0}
+        assert stats == {"analyzed": 2, "failed": 1, "skipped": 0, "status": "success"}
         # Commit should be called per successfully processed article
         assert mock_session.commit.call_count == 2
 
@@ -100,7 +104,10 @@ async def test_run_analysis_pipeline_quota_exhaustion_abort():
     mock_session.execute = AsyncMock()
     
     mock_execute_result = MagicMock()
-    mock_execute_result.scalars.return_value.all.return_value = [art1, art2, art3]
+    mock_execute_result.scalars.return_value.all.side_effect = [
+        [art1, art2, art3],
+        []
+    ]
     mock_session.execute.return_value = mock_execute_result
     mock_session.commit = AsyncMock()
 
@@ -124,7 +131,7 @@ async def test_run_analysis_pipeline_quota_exhaustion_abort():
         stats = await run_analysis_pipeline(batch_size=20)
         
         # Assert
-        assert stats == {"analyzed": 1, "failed": 1, "skipped": 0}
+        assert stats == {"analyzed": 1, "failed": 1, "skipped": 0, "status": "failed"}
         # Commit should only be called once (for art-1)
         assert mock_session.commit.call_count == 1
         # The loop should have aborted after art-2, meaning art-3 was never processed
@@ -140,9 +147,12 @@ async def test_run_analysis_pipeline_updates_task_run_progress():
     
     mock_session = MagicMock(spec=AsyncSession)
     mock_session.execute = AsyncMock()
-    
     mock_execute_result = MagicMock()
-    mock_execute_result.scalars.return_value.all.return_value = [art1, art2, art3]
+    mock_execute_result.scalar.return_value = "running"
+    mock_execute_result.scalars.return_value.all.side_effect = [
+        [art1, art2, art3],
+        []
+    ]
     mock_session.execute.return_value = mock_execute_result
     mock_session.commit = AsyncMock()
 
@@ -164,7 +174,7 @@ async def test_run_analysis_pipeline_updates_task_run_progress():
         stats = await run_analysis_pipeline(batch_size=20, task_run_id="test-run-123")
         
         # Assert: pipeline returned stats
-        assert stats == {"analyzed": 2, "failed": 1, "skipped": 0}
+        assert stats == {"analyzed": 2, "failed": 1, "skipped": 0, "status": "success"}
         
         # Verify execute calls on session include updates to TaskRun
         update_calls = []

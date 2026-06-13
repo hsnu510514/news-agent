@@ -5,8 +5,7 @@ import useSWR from "swr";
 import { fetchAPI, type AnalysisItem, type MarketWireItem, type NewsItem, type AlertItem } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Newspaper, Zap, BarChart3, TrendingUp, TrendingDown, Minus, AlertTriangle, X, Database } from "lucide-react";
-import { LiveProgressPanel } from "@/components/live-progress-panel";
+import { Newspaper, BarChart3, TrendingUp, TrendingDown, Minus, AlertTriangle, X, Database } from "lucide-react";
 
 const fetcher = async (url: string) => {
   const r = await fetch(url);
@@ -19,10 +18,7 @@ export default function DashboardPage() {
     `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/news?limit=5`,
     fetcher
   );
-  const { data: marketWireData } = useSWR(
-    `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/market-wire?limit=10`,
-    fetcher
-  );
+
   const { data: analysisData } = useSWR(
     `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/analysis?limit=10`,
     fetcher
@@ -68,7 +64,7 @@ export default function DashboardPage() {
   };
 
   const news: NewsItem[] = newsData?.items ?? [];
-  const marketWires: MarketWireItem[] = marketWireData?.items ?? [];
+
   const analysis: AnalysisItem[] = analysisData?.items ?? [];
   const alerts: AlertItem[] = alertsData?.alerts ?? [];
 
@@ -120,8 +116,6 @@ export default function DashboardPage() {
           ))}
         </div>
       )}
-
-      <LiveProgressPanel />
 
       <div>
         <h1 className="text-2xl font-bold">Dashboard</h1>
@@ -332,15 +326,7 @@ export default function DashboardPage() {
             <div className="text-2xl font-bold">{newsData?.total ?? 0}</div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Market Wire</CardTitle>
-            <Zap className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{marketWireData?.total ?? 0}</div>
-          </CardContent>
-        </Card>
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Analyzed</CardTitle>
@@ -394,33 +380,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Market Wire / 快讯</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {marketWires.map((item) => (
-              <div key={item.id} className="rounded-lg border p-3">
-                <p className="text-sm">{item.content}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  {item.related_symbols?.map((s) => (
-                    <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>
-                  ))}
-                  {item.importance > 0 && (
-                    <Badge variant={item.importance >= 3 ? "destructive" : "default"} className="text-xs">
-                      ★ {item.importance}
-                    </Badge>
-                  )}
-                </div>
-              </div>
-            ))}
-            {marketWires.length === 0 && (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                No market wires yet.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+
       </div>
 
       <Card>

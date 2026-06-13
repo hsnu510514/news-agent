@@ -33,7 +33,7 @@ export default function MacroPage() {
           </h2>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {items.map((item) => {
-              const change = item.previous_value
+              const change = (item.value !== null && item.previous_value !== null && item.previous_value !== 0)
                 ? ((item.value - item.previous_value) / Math.abs(item.previous_value)) * 100
                 : null;
               return (
@@ -46,11 +46,17 @@ export default function MacroPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">
-                      {item.value.toLocaleString(undefined, {
-                        minimumFractionDigits: 1,
-                        maximumFractionDigits: 2,
-                      })}
-                      {item.unit && <span className="text-sm font-normal text-muted-foreground ml-1">{item.unit}</span>}
+                      {item.value !== null && item.value !== undefined ? (
+                        item.value.toLocaleString(undefined, {
+                          minimumFractionDigits: 1,
+                          maximumFractionDigits: 2,
+                        })
+                      ) : (
+                        "N/A"
+                      )}
+                      {item.value !== null && item.value !== undefined && item.unit && (
+                        <span className="text-sm font-normal text-muted-foreground ml-1">{item.unit}</span>
+                      )}
                     </div>
                     {change !== null && (
                       <p className={`text-sm mt-1 ${change > 0 ? "text-green-600" : change < 0 ? "text-red-600" : "text-gray-500"}`}>

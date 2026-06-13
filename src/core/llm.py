@@ -8,12 +8,146 @@ from litellm import acompletion, aembedding
 from src.core.config import settings
 
 import asyncio
+import time
 from datetime import date
 from typing import Callable, Any
 
 logger = logging.getLogger("news-agent")
 
 litellm.suppress_debug_info = True
+
+
+class DailyQuotaExhaustedError(Exception):
+    """Raised when the Gemini API daily/persistent rate limit is exhausted."""
+    pass
+
+
+class ModelQuotaTracker:
+    def __init__(self):
+        # Maps model_name -> list of request timestamps (within last 60s)
+        self._requests: dict[str, list[float]] = {}
+        # Maps model_name -> list of tuples (timestamp, token_count)
+        self._tokens: dict[str, list[tuple[float, int]]] = {}
+        # Maps model_name -> daily count
+        self._rpd_counts: dict[str, int] = {}
+        # Maps model_name -> daily cost in USD
+        self._costs: dict[str, float] = {}
+        # Maps model_name -> daily prompt tokens
+        self._prompt_tokens: dict[str, int] = {}
+        # Maps model_name -> daily completion tokens
+        self._completion_tokens: dict[str, int] = {}
+        # Maps model_name -> date of last reset
+        self._last_reset_dates: dict[str, date] = {}
+        # Maps model_name -> status ("healthy", "rate_limited", "error")
+        self._status: dict[str, str] = {}
+        # Maps model_name -> last error message
+        self._error_messages: dict[str, str] = {}
+
+    def _reset_if_needed(self, model: str):
+        today = date.today()
+        if self._last_reset_dates.get(model) != today:
+            self._rpd_counts[model] = 0
+            self._costs[model] = 0.0
+            self._prompt_tokens[model] = 0
+            self._completion_tokens[model] = 0
+            self._last_reset_dates[model] = today
+            self._status[model] = "healthy"
+            self._error_messages[model] = ""
+
+    def record_request(
+        self, 
+        model: str, 
+        token_count: int, 
+        cost: float = 0.0, 
+        prompt_tokens: int = 0, 
+        completion_tokens: int = 0, 
+        timestamp: float | None = None
+    ):
+        if timestamp is None:
+            timestamp = time.time()
+        self._reset_if_needed(model)
+        
+        # Record request timestamp
+        if model not in self._requests:
+            self._requests[model] = []
+        self._requests[model].append(timestamp)
+        
+        # Record tokens
+        if model not in self._tokens:
+            self._tokens[model] = []
+        self._tokens[model].append((timestamp, token_count))
+        
+        # Increment RPD
+        self._rpd_counts[model] = self._rpd_counts.get(model, 0) + 1
+        
+        # Record cost and split tokens
+        self._costs[model] = self._costs.get(model, 0.0) + cost
+        self._prompt_tokens[model] = self._prompt_tokens.get(model, 0) + prompt_tokens
+        self._completion_tokens[model] = self._completion_tokens.get(model, 0) + completion_tokens
+        
+        self._status[model] = "healthy"
+        self._error_messages[model] = ""
+
+    def record_failure(self, model: str, error_msg: str, timestamp: float | None = None):
+        self._reset_if_needed(model)
+        is_rate_limit = "429" in error_msg or "rate limit" in error_msg.lower() or "quota" in error_msg.lower()
+        self._status[model] = "rate_limited" if is_rate_limit else "error"
+        self._error_messages[model] = error_msg
+
+    def get_rpm(self, model: str) -> int:
+        now = time.time()
+        reqs = self._requests.get(model, [])
+        # Clean up older than 60s
+        reqs = [t for t in reqs if now - t <= 60]
+        self._requests[model] = reqs
+        return len(reqs)
+
+    def get_tpm(self, model: str) -> int:
+        now = time.time()
+        tokens = self._tokens.get(model, [])
+        # Clean up older than 60s
+        tokens = [item for item in tokens if now - item[0] <= 60]
+        self._tokens[model] = tokens
+        return sum(item[1] for item in tokens)
+
+    def get_rpd(self, model: str) -> int:
+        self._reset_if_needed(model)
+        return self._rpd_counts.get(model, 0)
+
+    def get_cost(self, model: str) -> float:
+        self._reset_if_needed(model)
+        return self._costs.get(model, 0.0)
+
+    def get_prompt_tokens(self, model: str) -> int:
+        self._reset_if_needed(model)
+        return self._prompt_tokens.get(model, 0)
+
+    def get_completion_tokens(self, model: str) -> int:
+        self._reset_if_needed(model)
+        return self._completion_tokens.get(model, 0)
+
+    def get_status(self, model: str) -> str:
+        self._reset_if_needed(model)
+        return self._status.get(model, "healthy")
+
+    def get_error_message(self, model: str) -> str:
+        self._reset_if_needed(model)
+        return self._error_messages.get(model, "")
+
+    def reset_all(self):
+        self._requests.clear()
+        self._tokens.clear()
+        self._rpd_counts.clear()
+        self._costs.clear()
+        self._prompt_tokens.clear()
+        self._completion_tokens.clear()
+        self._last_reset_dates.clear()
+        self._status.clear()
+        self._error_messages.clear()
+
+
+# Instantiate singleton
+model_quota_tracker = ModelQuotaTracker()
 
 
 class DailyQuotaExhaustedError(Exception):
@@ -53,9 +187,38 @@ class LLMTaskQueue:
         self._worker_task = None
         self._running = False
         self._quota_exhausted = False
-        self.pacing_delay = 4.0
+        self._pacing_delay = None
+        self.last_used_model = None
         self.backoff_factor = 2.0
         self.status_tracker = api_status_tracker
+
+    @property
+    def pacing_delay(self) -> float:
+        # If we have an explicit override set on this queue instance (like in tests), use it
+        if self._pacing_delay is not None:
+            pacing_val = self._pacing_delay
+        else:
+            pacing_val = getattr(settings, "LLM_PACING_DELAY", "auto")
+
+        if pacing_val == "auto":
+            # Check last used model
+            model = getattr(self, "last_used_model", None)
+            if model:
+                if model.startswith("gemini/"):
+                    return 4.0
+                else:
+                    return 0.0
+            # If no model is set yet, default to safe 4.0
+            return 4.0
+        
+        try:
+            return float(pacing_val)
+        except (ValueError, TypeError):
+            return 4.0
+
+    @pacing_delay.setter
+    def pacing_delay(self, value):
+        self._pacing_delay = value
 
     async def submit_task(self, priority: int, func: Callable, *args, **kwargs) -> asyncio.Future:
         # Check if the day has changed since last reset to automatically reset and restart the queue
@@ -181,43 +344,173 @@ class LLMTaskQueue:
 llm_queue = LLMTaskQueue()
 
 
+def check_budget_limit(model: str):
+    # Ollama models are local/free and bypass budget checks
+    if model.startswith("ollama/"):
+        return
+    
+    total_cost = sum(model_quota_tracker.get_cost(m) for m in model_quota_tracker._costs.keys())
+    if total_cost >= settings.DAILY_SPEND_LIMIT:
+        raise DailyQuotaExhaustedError(
+            f"Daily spend limit of ${settings.DAILY_SPEND_LIMIT:.2f} reached (Spent: ${total_cost:.4f})."
+        )
+
+
+async def tracked_acompletion(model: str, messages: list[dict], **kwargs) -> Any:
+    if not model:
+        raise ValueError("Model configuration is incomplete. Please configure your models in Settings.")
+    check_budget_limit(model)
+    llm_queue.last_used_model = model
+    try:
+        response = await acompletion(model=model, messages=messages, **kwargs)
+        prompt_tokens = 0
+        completion_tokens = 0
+        cost = 0.0
+        if hasattr(response, "usage") and response.usage:
+            prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
+        total_tokens = prompt_tokens + completion_tokens
+        
+        # Calculate cost using LiteLLM
+        try:
+            cost = litellm.completion_cost(response) or 0.0
+        except Exception:
+            pass
+
+        model_quota_tracker.record_request(
+            model=model,
+            token_count=total_tokens,
+            cost=cost,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens
+        )
+        return response
+    except Exception as e:
+        if not isinstance(e, DailyQuotaExhaustedError):
+            model_quota_tracker.record_failure(model, str(e))
+        raise e
+
+
+async def tracked_aembedding(model: str, input: list[str], **kwargs) -> Any:
+    if not model:
+        raise ValueError("Model configuration is incomplete. Please configure your models in Settings.")
+    check_budget_limit(model)
+    llm_queue.last_used_model = model
+    try:
+        response = await aembedding(model=model, input=input, **kwargs)
+        prompt_tokens = 0
+        cost = 0.0
+        if hasattr(response, "usage") and response.usage:
+            prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+        elif hasattr(response, "data") and response.data:
+            # Fallback estimation: ~1 token per 4 chars
+            char_count = sum(len(text) for text in input)
+            prompt_tokens = max(1, char_count // 4)
+            
+        # Calculate cost using LiteLLM
+        try:
+            cost = litellm.completion_cost(response) or 0.0
+        except Exception:
+            pass
+
+        model_quota_tracker.record_request(
+            model=model,
+            token_count=prompt_tokens,
+            cost=cost,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=0
+        )
+        return response
+    except Exception as e:
+        if not isinstance(e, DailyQuotaExhaustedError):
+            model_quota_tracker.record_failure(model, str(e))
+        raise e
+
+
 # Raw LLM completion functions wrapped for the queue
-async def _raw_classify(text: str) -> str:
-    response = await acompletion(
-        model=settings.LLM_CLASSIFY_MODEL,
-        messages=[{"role": "user", "content": f"{text}\n\nReturn your response as a valid JSON object only. Do not include any text outside the JSON."}],
-        temperature=0.1,
-    )
-    return response.choices[0].message.content
+async def _raw_classify(text: str, system_prompt: str | None = None) -> str:
+    messages = []
+    sys_prompt = system_prompt or ""
+    json_instruction = "Return your response as a valid JSON object only. Do not include any text outside the JSON."
+    if sys_prompt:
+        sys_prompt = f"{sys_prompt}\n\n{json_instruction}"
+    else:
+        sys_prompt = json_instruction
+        
+    messages.append({"role": "system", "content": sys_prompt})
+    messages.append({"role": "user", "content": text})
+
+    try:
+        response = await tracked_acompletion(
+            model=settings.LLM_CLASSIFY_MODEL,
+            messages=messages,
+            temperature=0.1,
+        )
+        return response.choices[0].message.content
+    except Exception as primary_exc:
+        fallback_model = settings.LLM_REASONING_FALLBACK_MODEL
+        if fallback_model and fallback_model != settings.LLM_CLASSIFY_MODEL:
+            logger.warning(
+                "Primary classification model %s failed. Falling back to %s. Error: %s",
+                settings.LLM_CLASSIFY_MODEL, fallback_model, primary_exc
+            )
+            response = await tracked_acompletion(
+                model=fallback_model,
+                messages=messages,
+                temperature=0.1,
+            )
+            return response.choices[0].message.content
+        raise primary_exc
 
 
-async def classify(text: str, priority: int = 2) -> str:
-    fut = await llm_queue.submit_task(priority, _raw_classify, text)
+async def classify(text: str, system_prompt: str | None = None, priority: int = 2) -> str:
+    fut = await llm_queue.submit_task(priority, _raw_classify, text, system_prompt=system_prompt)
     return await fut
 
 
-async def _raw_check_relevance(prompt: str) -> str:
-    response = await acompletion(
-        model=settings.LLM_RELEVANCE_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
-    )
-    return response.choices[0].message.content
+async def _raw_check_relevance(text: str, system_prompt: str | None = None) -> str:
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": text})
+    try:
+        response = await tracked_acompletion(
+            model=settings.LLM_RELEVANCE_MODEL,
+            messages=messages,
+            temperature=0.1,
+        )
+        return response.choices[0].message.content
+    except Exception as primary_exc:
+        fallback_model = settings.LLM_LIGHTWEIGHT_FALLBACK_MODEL
+        if fallback_model and fallback_model != settings.LLM_RELEVANCE_MODEL:
+            logger.warning(
+                "Primary relevance model %s failed. Falling back to %s. Error: %s",
+                settings.LLM_RELEVANCE_MODEL, fallback_model, primary_exc
+            )
+            response = await tracked_acompletion(
+                model=fallback_model,
+                messages=messages,
+                temperature=0.1,
+            )
+            return response.choices[0].message.content
+        raise primary_exc
 
 
 async def check_relevance(title: str, summary: str, priority: int = 1) -> bool:
     import json
-    prompt = (
+    system_prompt = (
         "You are an investment research filter. Analyze the news article title and summary.\n"
         "Determine if it is relevant to:\n"
         "1. Financial News (corporate earnings, stock market, company updates, sector trends, IPOs, mergers).\n"
         "2. Global Affairs & Macro Policy (geopolitics, trade, monetary/fiscal policy, regulations, central banks, elections).\n\n"
-        "Return a JSON object with a single boolean field \"relevant\". Do not include any other text.\n\n"
+        "Return a JSON object with a single boolean field \"relevant\". Do not include any other text."
+    )
+    user_content = (
         f"Title: {title}\n"
         f"Summary: {summary or ''}"
     )
     try:
-        fut = await llm_queue.submit_task(priority, _raw_check_relevance, prompt)
+        fut = await llm_queue.submit_task(priority, _raw_check_relevance, user_content, system_prompt=system_prompt)
         raw_response = await fut
         clean_response = raw_response.strip()
         if clean_response.startswith("```json"):
@@ -239,12 +532,27 @@ async def _raw_summarize(text: str, system_prompt: str | None = None) -> str:
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": text})
-    response = await acompletion(
-        model=settings.LLM_SUMMARIZE_MODEL,
-        messages=messages,
-        temperature=0.3,
-    )
-    return response.choices[0].message.content
+    try:
+        response = await tracked_acompletion(
+            model=settings.LLM_SUMMARIZE_MODEL,
+            messages=messages,
+            temperature=0.3,
+        )
+        return response.choices[0].message.content
+    except Exception as primary_exc:
+        fallback_model = settings.LLM_LIGHTWEIGHT_FALLBACK_MODEL
+        if fallback_model and fallback_model != settings.LLM_SUMMARIZE_MODEL:
+            logger.warning(
+                "Primary summarization model %s failed. Falling back to %s. Error: %s",
+                settings.LLM_SUMMARIZE_MODEL, fallback_model, primary_exc
+            )
+            response = await tracked_acompletion(
+                model=fallback_model,
+                messages=messages,
+                temperature=0.3,
+            )
+            return response.choices[0].message.content
+        raise primary_exc
 
 
 async def summarize(text: str, system_prompt: str | None = None, priority: int = 2) -> str:
@@ -257,12 +565,27 @@ async def _raw_deep_analysis(text: str, system_prompt: str | None = None) -> str
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": text})
-    response = await acompletion(
-        model=settings.LLM_ANALYSIS_MODEL,
-        messages=messages,
-        temperature=0.2,
-    )
-    return response.choices[0].message.content
+    try:
+        response = await tracked_acompletion(
+            model=settings.LLM_ANALYSIS_MODEL,
+            messages=messages,
+            temperature=0.2,
+        )
+        return response.choices[0].message.content
+    except Exception as primary_exc:
+        fallback_model = settings.LLM_REASONING_FALLBACK_MODEL
+        if fallback_model and fallback_model != settings.LLM_ANALYSIS_MODEL:
+            logger.warning(
+                "Primary deep analysis model %s failed. Falling back to %s. Error: %s",
+                settings.LLM_ANALYSIS_MODEL, fallback_model, primary_exc
+            )
+            response = await tracked_acompletion(
+                model=fallback_model,
+                messages=messages,
+                temperature=0.2,
+            )
+            return response.choices[0].message.content
+        raise primary_exc
 
 
 async def deep_analysis(text: str, system_prompt: str | None = None, priority: int = 2) -> str:
@@ -272,7 +595,7 @@ async def deep_analysis(text: str, system_prompt: str | None = None, priority: i
 
 async def _raw_get_embedding(text: str) -> list[float]:
     try:
-        response = await aembedding(
+        response = await tracked_aembedding(
             model=settings.LLM_EMBED_MODEL,
             input=[text],
             dimensions=768,
@@ -286,7 +609,7 @@ async def _raw_get_embedding(text: str) -> list[float]:
                 settings.LLM_EMBED_MODEL, fallback_model, primary_exc
             )
             try:
-                response = await aembedding(
+                response = await tracked_aembedding(
                     model=fallback_model,
                     input=[text],
                     dimensions=768,

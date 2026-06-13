@@ -130,8 +130,12 @@ async def _process_akshare_indicator(session: AsyncSession, indicator: dict) -> 
     latest_row = df.iloc[-1]
     columns = df.columns.tolist()
 
-    date_col = columns[0]
-    value_col = columns[1]
+    if code in ["CPI_CN", "PPI_CN"]:
+        date_col = columns[1]
+        value_col = columns[2]
+    else:
+        date_col = columns[0]
+        value_col = columns[1]
 
     latest_date = latest_row[date_col]
     latest_value = float(latest_row[value_col])

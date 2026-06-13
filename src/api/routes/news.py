@@ -3,9 +3,10 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, desc
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.schema import NewsArticle, LanguageEnum, SentimentEnum
+from src.models.schema import NewsArticle, LanguageEnum, SentimentEnum, UrgencyEnum, AnalysisResult
 from src.storage.database import get_session
 
 router = APIRouter()
@@ -16,13 +17,15 @@ async def list_news(
     language: LanguageEnum | None = None,
     source_type: str | None = None,
     sentiment: SentimentEnum | None = None,
+    urgency: UrgencyEnum | None = None,
+    is_analyzed: bool | None = None,
     since: datetime | None = None,
     search: str | None = None,
     limit: int = Query(default=20, le=100),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    stmt = select(NewsArticle).order_by(desc(NewsArticle.published_at))
+    stmt = select(NewsArticle).options(selectinload(NewsArticle.analysis)).order_by(desc(NewsArticle.published_at))
     count_stmt = select(func.count()).select_from(NewsArticle)
 
     # Exclude syndicated content by default
@@ -36,13 +39,35 @@ async def list_news(
         stmt = stmt.where(NewsArticle.source_type == source_type)
         count_stmt = count_stmt.where(NewsArticle.source_type == source_type)
     if sentiment:
-        stmt = stmt.join(NewsArticle.analysis).where(NewsArticle.analysis.has(sentiment=sentiment))
+        stmt = stmt.join(NewsArticle.analysis).where(AnalysisResult.sentiment == sentiment)
+        count_stmt = count_stmt.join(NewsArticle.analysis).where(AnalysisResult.sentiment == sentiment)
+    if urgency:
+        stmt = stmt.join(NewsArticle.analysis).where(AnalysisResult.urgency == urgency)
+        count_stmt = count_stmt.join(NewsArticle.analysis).where(AnalysisResult.urgency == urgency)
+    if is_analyzed is not None:
+        if is_analyzed:
+            stmt = stmt.join(NewsArticle.analysis)
+            count_stmt = count_stmt.join(NewsArticle.analysis)
+        else:
+            stmt = stmt.outerjoin(NewsArticle.analysis).where(AnalysisResult.id.is_(None))
+            count_stmt = count_stmt.outerjoin(NewsArticle.analysis).where(AnalysisResult.id.is_(None))
     if since:
         stmt = stmt.where(NewsArticle.published_at >= since)
         count_stmt = count_stmt.where(NewsArticle.published_at >= since)
     if search:
-        stmt = stmt.where(NewsArticle.title.ilike(f"%{search}%"))
-        count_stmt = count_stmt.where(NewsArticle.title.ilike(f"%{search}%"))
+        from sqlalchemy import or_, String, cast
+        stmt = stmt.outerjoin(NewsArticle.analysis)
+        count_stmt = count_stmt.outerjoin(NewsArticle.analysis)
+        search_filter = or_(
+            NewsArticle.title.ilike(f"%{search}%"),
+            AnalysisResult.summary_en.ilike(f"%{search}%"),
+            AnalysisResult.summary_zh.ilike(f"%{search}%"),
+            AnalysisResult.impact_assessment.ilike(f"%{search}%"),
+            cast(AnalysisResult.topics, String).ilike(f"%{search}%"),
+            cast(AnalysisResult.companies_mentioned, String).ilike(f"%{search}%"),
+        )
+        stmt = stmt.where(search_filter)
+        count_stmt = count_stmt.where(search_filter)
 
     total = (await session.execute(count_stmt)).scalar_one()
     rows = (await session.execute(stmt.offset(offset).limit(limit))).scalars().all()
@@ -63,6 +88,19 @@ async def list_news(
                 "summary": r.summary,
                 "published_at": r.published_at.isoformat() if r.published_at else None,
                 "fetched_at": r.fetched_at.isoformat(),
+                "analysis": {
+                    "id": r.analysis[0].id,
+                    "urgency": r.analysis[0].urgency.value if r.analysis[0].urgency else None,
+                    "sentiment": r.analysis[0].sentiment.value if r.analysis[0].sentiment else None,
+                    "sentiment_score": r.analysis[0].sentiment_score,
+                    "topics": r.analysis[0].topics,
+                    "companies_mentioned": r.analysis[0].companies_mentioned,
+                    "summary_en": r.analysis[0].summary_en,
+                    "summary_zh": r.analysis[0].summary_zh,
+                    "impact_assessment": r.analysis[0].impact_assessment,
+                    "llm_model": r.analysis[0].llm_model,
+                    "analyzed_at": r.analysis[0].analyzed_at.isoformat(),
+                } if r.analysis else None,
             }
             for r in rows
         ],

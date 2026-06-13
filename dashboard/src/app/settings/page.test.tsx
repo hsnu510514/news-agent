@@ -23,6 +23,8 @@ describe("Settings Page Tabs - Slice 6", () => {
       last_run_status: "success",
       last_run_message: "",
       next_run_time: "2026-06-07T09:30:00Z",
+      in_cooldown: false,
+      cooldown_remaining_seconds: 0,
     },
     {
       id: "newsapi",
@@ -34,6 +36,8 @@ describe("Settings Page Tabs - Slice 6", () => {
       last_run_status: null,
       last_run_message: null,
       next_run_time: null,
+      in_cooldown: false,
+      cooldown_remaining_seconds: 0,
     },
   ];
 
@@ -290,9 +294,75 @@ describe("Entity Glossary Manager - Slice 7", () => {
       );
     });
   });
+
+  it("paginates glossary items correctly", async () => {
+    // Generate 12 mock items
+    const manyItems = Array.from({ length: 12 }, (_, i) => ({
+      id: `g-${i}`,
+      term_en: `Term ${String.fromCharCode(65 + i)}`,
+      term_zh: `中文 ${i}`,
+      type: "company",
+      is_verified: true,
+    }));
+
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes("/api/scheduler/jobs")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      }
+      if (url.includes("/api/glossary")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: manyItems }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
+    });
+
+    render(
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <SettingsPage />
+      </SWRConfig>
+    );
+
+    // Switch to Glossary tab
+    const glossaryTab = await screen.findByRole("tab", { name: /Entity Glossary/i });
+    fireEvent.click(glossaryTab);
+
+    // Verify first 10 items are rendered, but 11th and 12th are not
+    expect(await screen.findByText("Term A")).toBeInTheDocument();
+    expect(screen.getByText("Term J")).toBeInTheDocument();
+    expect(screen.queryByText("Term K")).not.toBeInTheDocument();
+    expect(screen.queryByText("Term L")).not.toBeInTheDocument();
+
+    // Verify pagination info text
+    expect(screen.getByText((_, el) => el?.tagName.toLowerCase() === "div" && !el?.className.includes("font-medium") && el?.textContent === "Showing 1 to 10 of 12 terms")).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.tagName.toLowerCase() === "div" && el?.className.includes("font-medium") && el?.textContent === "Page 1 of 2")).toBeInTheDocument();
+
+    // Click next page button
+    const nextBtn = screen.getByRole("button", { name: /next-page/i });
+    expect(nextBtn).toBeInTheDocument();
+    fireEvent.click(nextBtn);
+
+    // Now Term K and Term L should be visible, and Term A should not
+    expect(await screen.findByText("Term K")).toBeInTheDocument();
+    expect(screen.getByText("Term L")).toBeInTheDocument();
+    expect(screen.queryByText("Term A")).not.toBeInTheDocument();
+
+    // Verify updated pagination info text
+    expect(screen.getByText((_, el) => el?.tagName.toLowerCase() === "div" && !el?.className.includes("font-medium") && el?.textContent === "Showing 11 to 12 of 12 terms")).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.tagName.toLowerCase() === "div" && el?.className.includes("font-medium") && el?.textContent === "Page 2 of 2")).toBeInTheDocument();
+
+    // Click previous page button
+    const prevBtn = screen.getByRole("button", { name: /previous-page/i });
+    expect(prevBtn).toBeInTheDocument();
+    fireEvent.click(prevBtn);
+
+    // Now back to page 1
+    expect(await screen.findByText("Term A")).toBeInTheDocument();
+    expect(screen.queryByText("Term K")).not.toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.tagName.toLowerCase() === "div" && el?.className.includes("font-medium") && el?.textContent === "Page 1 of 2")).toBeInTheDocument();
+  });
 });
 
-describe("Settings Page - Live Progress Panel", () => {
+
+describe("Settings Page - Divergence Monitor Tab", () => {
   beforeEach(() => {
     mockFetch.mockReset();
     vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:8000");
@@ -302,40 +372,40 @@ describe("Settings Page - Live Progress Panel", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the LiveProgressPanel on Settings page", async () => {
+  it("renders the divergence monitor tab with duplicate subjects and duplicate insights tables", async () => {
+    const mockDivergence = {
+      subjects: [
+        {
+          id1: "s-1",
+          name1: "Focuslight Technologies",
+          id2: "s-2",
+          name2: "Focuslight Tech",
+          type: "ticker",
+          similarity: 0.65,
+        },
+      ],
+      insights: [
+        {
+          subject_name: "AAPL",
+          id1: "i-1",
+          dim1: "Q1 2026 Earnings Results",
+          summary1: "Apple announced strong Q1 2026 earnings results.",
+          id2: "i-2",
+          dim2: "Q1 2026 Financial Results",
+          summary2: "Apple announced strong Q1 2026 financial results.",
+          similarity: 0.84,
+        },
+      ],
+    };
+
     mockFetch.mockImplementation((url: string) => {
       if (url.includes("/api/scheduler/jobs")) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve([]),
-        });
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
       }
-      if (url.includes("/api/tasks/analysis-stats")) {
-        return Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              total_news: 150,
-              pending_news: 12,
-              active_run: {
-                id: "run-active",
-                job_id: "analysis",
-                task_name: "AI Analysis",
-                trigger_type: "manual",
-                status: "running",
-                start_time: "2026-06-08T10:00:00Z",
-                processed_count: 8,
-                failed_count: 2,
-                total_count: 20,
-                message: null,
-              },
-            }),
-        });
+      if (url.includes("/api/insights/divergence")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockDivergence) });
       }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ items: [] }),
-      });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
     });
 
     render(
@@ -344,11 +414,21 @@ describe("Settings Page - Live Progress Panel", () => {
       </SWRConfig>
     );
 
-    // Verify progress panel is rendered with active task details
-    expect(await screen.findByText(/Active Task: AI Analysis/i)).toBeInTheDocument();
-    expect(screen.getByText(/Processed: 8 \/ 20 articles/i)).toBeInTheDocument();
-    expect(screen.getByText(/Failed: 2/i)).toBeInTheDocument();
-    expect(screen.getByText(/Backlog: 12 pending/i)).toBeInTheDocument();
+    // Verify Tab Trigger exists and click it
+    const divergenceTab = await screen.findByRole("tab", { name: /Divergence Monitor/i });
+    expect(divergenceTab).toBeInTheDocument();
+    fireEvent.click(divergenceTab);
+
+    // Verify duplicate subjects render
+    expect(await screen.findByText("Focuslight Technologies")).toBeInTheDocument();
+    expect(screen.getByText("Focuslight Tech")).toBeInTheDocument();
+    expect(screen.getByText("65%")).toBeInTheDocument();
+
+    // Verify duplicate insights render
+    expect(screen.getByText("AAPL")).toBeInTheDocument();
+    expect(screen.getByText("Q1 2026 Earnings Results")).toBeInTheDocument();
+    expect(screen.getByText("Q1 2026 Financial Results")).toBeInTheDocument();
+    expect(screen.getByText("84%")).toBeInTheDocument();
   });
 });
 

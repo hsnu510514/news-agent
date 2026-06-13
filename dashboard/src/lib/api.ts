@@ -23,6 +23,7 @@ export type NewsItem = {
   summary: string | null;
   published_at: string | null;
   fetched_at: string;
+  analysis?: AnalysisItem | null;
 };
 
 export type AnalysisItem = {
@@ -68,7 +69,7 @@ export type MacroItem = {
   indicator_code: string;
   indicator_name: string;
   country: string;
-  value: number;
+  value: number | null;
   unit: string | null;
   period: string;
   previous_value: number | null;

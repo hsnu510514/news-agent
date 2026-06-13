@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
+import { UnconfiguredModelBanner } from "@/components/unconfigured-model-banner";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -21,6 +22,7 @@ export default function RootLayout({
         <div className="flex h-screen">
           <Sidebar />
           <main className="flex-1 overflow-auto p-6 bg-background">
+            <UnconfiguredModelBanner />
             {children}
           </main>
         </div>

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select, func
 
-from src.models.schema import NewsArticle, MarketWire
+from src.models.schema import NewsArticle
 from src.storage.database import async_session_factory
 
 logger = logging.getLogger("news-agent")
@@ -21,6 +21,7 @@ async def deduplicate_news() -> dict:
     async with async_session_factory() as session:
         stmt = (
             select(NewsArticle.url_hash, func.count(NewsArticle.id))
+            .where(NewsArticle.duplicate_of_id.is_(None))
             .group_by(NewsArticle.url_hash)
             .having(func.count(NewsArticle.id) > 1)
         )
@@ -32,6 +33,7 @@ async def deduplicate_news() -> dict:
                 await session.execute(
                     select(NewsArticle)
                     .where(NewsArticle.url_hash == url_hash)
+                    .where(NewsArticle.duplicate_of_id.is_(None))
                     .order_by(NewsArticle.fetched_at.asc())
                 )
             ).scalars().all()
@@ -44,6 +46,7 @@ async def deduplicate_news() -> dict:
         content_stmt = (
             select(NewsArticle.content_hash, func.count(NewsArticle.id))
             .where(NewsArticle.content_hash.isnot(None))
+            .where(NewsArticle.duplicate_of_id.is_(None))
             .group_by(NewsArticle.content_hash)
             .having(func.count(NewsArticle.id) > 1)
         )
@@ -55,6 +58,7 @@ async def deduplicate_news() -> dict:
                 await session.execute(
                     select(NewsArticle)
                     .where(NewsArticle.content_hash == content_hash)
+                    .where(NewsArticle.duplicate_of_id.is_(None))
                     .order_by(NewsArticle.fetched_at.asc())
                 )
             ).scalars().all()

@@ -52,10 +52,8 @@ async def generate_daily_briefing() -> DailyBriefing | None:
             )
         updates_text = "\n\n".join(updates_text_list)
 
-        prompt = (
+        system_prompt = (
             "You are an expert investment analyst synthesizing a Daily Briefing.\n"
-            "Here are the updates from our Insight Vault over the previous 24 hours:\n\n"
-            f"{updates_text}\n\n"
             "Synthesize this information into a high-level bilingual Daily Briefing. "
             "Group updates by significance, separating macro themes from corporate ones. "
             "Output your response strictly as a JSON object with this format:\n"
@@ -66,9 +64,13 @@ async def generate_daily_briefing() -> DailyBriefing | None:
             "  \"key_takeaways_zh\": [\"3-5 key high-impact takeaways in Chinese\"]\n"
             "}\n"
         )
+        user_content = (
+            "Here are the updates from our Insight Vault over the previous 24 hours:\n\n"
+            f"{updates_text}"
+        )
 
         try:
-            raw_response = await deep_analysis(prompt, priority=0)
+            raw_response = await deep_analysis(text=user_content, system_prompt=system_prompt, priority=0)
             clean_response = raw_response.strip()
             if clean_response.startswith("```json"):
                 clean_response = clean_response[7:]

@@ -9,7 +9,6 @@ from src.storage.vectorstore import upsert_embedding, search_embeddings_with_fil
 from src.analysis.translation import get_glossary_prompt_extension, register_detected_entities
 from src.models.schema import (
     AnalysisResult,
-    MarketWire,
     LanguageEnum,
     NewsArticle,
     SentimentEnum,
@@ -36,7 +35,7 @@ async def analyze_article(article: NewsArticle) -> AnalysisResult:
     language = article.language
 
     classify_prompt = _load_prompt("classify.yaml")
-    classify_result = await classify(f"{classify_prompt}\n\n{text}")
+    classify_result = await classify(text=text, system_prompt=classify_prompt)
 
     classification = _parse_json(classify_result, {})
 
@@ -48,7 +47,7 @@ async def analyze_article(article: NewsArticle) -> AnalysisResult:
     market_impact = classification.get("market_impact", "")
 
     summarize_prompt = _load_prompt("summarize.yaml")
-    summarize_result = await summarize(f"{summarize_prompt}\n\n{text}")
+    summarize_result = await summarize(text=text, system_prompt=summarize_prompt)
     summaries = _parse_json(summarize_result, {})
 
     summary_en = summaries.get("summary_en", "")
@@ -96,7 +95,7 @@ async def deep_analyze_article(article: NewsArticle, classification: AnalysisRes
     extract_prompt = _load_prompt("extract.yaml")
 
     try:
-        result = await deep_analysis(f"{extract_prompt}\n\n{text}")
+        result = await deep_analysis(text=text, system_prompt=extract_prompt)
         analysis = _parse_json(result, {})
         return analysis.get("impact_assessment", "")
     except Exception:
@@ -164,6 +163,8 @@ async def process_article_sequentially(article: NewsArticle, session: AsyncSessi
                     
                     article.duplicate_of_id = matched_art.id
                     article.is_relevant = False
+                    if matched_art.title_zh:
+                        article.title_zh = matched_art.title_zh
                     
                     analysis_res = AnalysisResult(
                         article_id=article.id,
@@ -234,18 +235,24 @@ async def process_article_sequentially(article: NewsArticle, session: AsyncSessi
 
     # 5. Construct prompt
     prompt_template = _load_prompt("sequential.txt")
-    prompt = prompt_template.format(
-        title=article.title,
-        content=article.content or "",
-        existing_insights=existing_insights_text,
-        glossary_extension=glossary_extension,
+    user_content = (
+        "Here is the new article to analyze:\n"
+        f"Title: {article.title}\n"
+        f"Content: {article.content or ''}\n\n"
+        "Here are the most relevant existing Insights from our Insight Vault:\n"
+        f"{existing_insights_text}\n\n"
+        f"{glossary_extension}"
     )
 
     # 6. Call LLM
-    raw_response = await classify(prompt)
+    raw_response = await classify(text=user_content, system_prompt=prompt_template)
     decision = _parse_json(raw_response, {"action": "NO_CHANGE"})
 
     action = decision.get("action", "NO_CHANGE")
+
+    translated_title = decision.get("translated_title")
+    if translated_title and article.language == LanguageEnum.EN:
+        article.title_zh = translated_title
 
     urgency_val = UrgencyEnum.MEDIUM
     sentiment_val = SentimentEnum.NEUTRAL
@@ -405,4 +412,9 @@ async def process_article_sequentially(article: NewsArticle, session: AsyncSessi
         llm_model="sequential_pipeline",
     )
     session.add(analysis_res)
+    
+    # Clear heavy fields to save space
+    article.content = None
+    article.summary = None
+    
     logger.info("Processed article '%s', Action: %s", article.title[:50], action)

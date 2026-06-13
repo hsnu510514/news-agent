@@ -179,4 +179,39 @@ async def test_priority_queue_day_change_restart():
     await queue.stop()
 
 
+def test_priority_queue_dynamic_pacing_resolution(monkeypatch):
+    from src.core.config import settings
+    queue = LLMTaskQueue()
+    
+    # 1. Test Auto mode (default)
+    monkeypatch.setattr(settings, "LLM_PACING_DELAY", "auto")
+    
+    # No last used model -> defaults to safe 4.0
+    queue.last_used_model = None
+    assert queue.pacing_delay == 4.0
+    
+    # Gemini model -> 4.0s
+    queue.last_used_model = "gemini/gemini-2.0-flash"
+    assert queue.pacing_delay == 4.0
+    
+    # Ollama model -> 0.0s
+    queue.last_used_model = "ollama/gemma4:12b"
+    assert queue.pacing_delay == 0.0
+    
+    # Other paid model -> 0.0s
+    queue.last_used_model = "openai/gpt-4o"
+    assert queue.pacing_delay == 0.0
+    
+    # 2. Test numeric override setting
+    monkeypatch.setattr(settings, "LLM_PACING_DELAY", "1.5")
+    queue.last_used_model = "ollama/gemma4:12b"
+    assert queue.pacing_delay == 1.5
+    queue.last_used_model = "gemini/gemini-2.0-flash"
+    assert queue.pacing_delay == 1.5
+    
+    # 3. Test direct queue property override (unit tests compatibility)
+    queue.pacing_delay = 0.05
+    assert queue.pacing_delay == 0.05
+
+
 
