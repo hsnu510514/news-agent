@@ -14,69 +14,90 @@ from src.storage.database import async_session_factory
 logger = logging.getLogger("news-agent")
 
 
-async def ingest_yfinance_earnings() -> int:
-    import yfinance as yf
+from src.ingest.interface import BaseIngestAdapter, IngestionSourceType
 
-    total_saved = 0
-    async with async_session_factory() as session:
+class EarningsIngestAdapter(BaseIngestAdapter):
+    async def fetch(self, client: httpx.AsyncClient, session: AsyncSession) -> Sequence[EarningsReport]:
+        import yfinance as yf
+        
+        articles = []
         for ticker_symbol in TRACKED_TICKERS:
             try:
-                count = await _process_ticker(session, ticker_symbol)
-                total_saved += count
+                ticker = yf.Ticker(ticker_symbol)
+                info = ticker.info
+                if not info:
+                    continue
+
+                eps = info.get("trailingEps")
+                revenue = info.get("totalRevenue")
+                net_income = info.get("netIncomeToCommon")
+                company_name = info.get("longName") or info.get("shortName", ticker_symbol)
+
+                report = EarningsReport(
+                    ticker=ticker_symbol,
+                    company_name=company_name,
+                    source_type=SourceTypeEnum.YFINANCE,
+                    revenue=float(revenue) if revenue else None,
+                    net_income=float(net_income) if net_income else None,
+                    eps=float(eps) if eps else None,
+                    report_date=datetime.now(tz=timezone.utc),
+                    raw_data={
+                        "market_cap": info.get("marketCap"),
+                        "pe_ratio": info.get("trailingPE"),
+                        "forward_pe": info.get("forwardPE"),
+                        "dividend_yield": info.get("dividendYield"),
+                        "beta": info.get("beta"),
+                        "52week_high": info.get("fiftyTwoWeekHigh"),
+                        "52week_low": info.get("fiftyTwoWeekLow"),
+                        "volume": info.get("volume"),
+                        "avg_volume": info.get("averageVolume"),
+                    },
+                )
+                articles.append(report)
             except Exception:
-                logger.exception("Failed to ingest yfinance data for %s", ticker_symbol)
+                logger.exception("Failed to fetch yfinance data for %s", ticker_symbol)
+        
+        return articles
 
-    return total_saved
+    async def filter_duplicates(self, items: Sequence[EarningsReport], session: AsyncSession) -> Sequence[EarningsReport]:
+        if not items:
+            return []
+
+        # Deduplicate list itself by ticker
+        unique_fetched = {}
+        for item in items:
+            unique_fetched[item.ticker] = item
+
+        non_duplicates = []
+        for ticker, item in unique_fetched.items():
+            existing = await session.execute(
+                select(EarningsReport)
+                .where(
+                    EarningsReport.ticker == ticker,
+                    EarningsReport.source_type == SourceTypeEnum.YFINANCE,
+                )
+                .order_by(EarningsReport.report_date.desc())
+            )
+            latest = existing.scalars().first()
+            if latest and latest.revenue == item.revenue and latest.eps == item.eps:
+                continue
+            non_duplicates.append(item)
+
+        return non_duplicates
 
 
-async def _process_ticker(session: AsyncSession, ticker_symbol: str) -> int:
-    import yfinance as yf
+# Register the adapter
+from src.ingest.pipeline import register_adapter
+register_adapter(IngestionSourceType.EARNINGS, EarningsIngestAdapter())
 
-    ticker = yf.Ticker(ticker_symbol)
-    info = ticker.info
 
-    if not info:
-        return 0
+# Deprecated shim wrapper
+async def ingest_yfinance_earnings() -> int:
+    """Deprecated: use src.ingest.pipeline.ingest_source instead."""
+    from src.ingest.pipeline import ingest_source
+    summary = await ingest_source(IngestionSourceType.EARNINGS)
+    return summary.saved_count
 
-    existing = await session.execute(
-        select(EarningsReport).where(
-            EarningsReport.ticker == ticker_symbol,
-            EarningsReport.source_type == SourceTypeEnum.YFINANCE,
-        )
-    )
-    latest = existing.scalar_one_or_none()
-
-    eps = info.get("trailingEps")
-    revenue = info.get("totalRevenue")
-    net_income = info.get("netIncomeToCommon")
-    company_name = info.get("longName") or info.get("shortName", ticker_symbol)
-
-    if latest and latest.revenue == revenue and latest.eps == eps:
-        return 0
-
-    report = EarningsReport(
-        ticker=ticker_symbol,
-        company_name=company_name,
-        source_type=SourceTypeEnum.YFINANCE,
-        revenue=float(revenue) if revenue else None,
-        net_income=float(net_income) if net_income else None,
-        eps=float(eps) if eps else None,
-        report_date=datetime.now(tz=timezone.utc),
-        raw_data={
-            "market_cap": info.get("marketCap"),
-            "pe_ratio": info.get("trailingPE"),
-            "forward_pe": info.get("forwardPE"),
-            "dividend_yield": info.get("dividendYield"),
-            "beta": info.get("beta"),
-            "52week_high": info.get("fiftyTwoWeekHigh"),
-            "52week_low": info.get("fiftyTwoWeekLow"),
-            "volume": info.get("volume"),
-            "avg_volume": info.get("averageVolume"),
-        },
-    )
-    session.add(report)
-    await session.commit()
-    return 1
 
 
 async def ingest_yfinance_earnings_history() -> int:

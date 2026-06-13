@@ -19,7 +19,8 @@ def _lazy_load_adapters() -> None:
         import src.ingest.news_fetcher
         import src.ingest.newsapi_fetcher
         import src.ingest.collector_fetcher
-        # earnings and macro will be added as we migrate them
+        import src.ingest.earnings_fetcher
+        import src.ingest.macro_fetcher
     except ImportError:
         logger.exception("Failed to lazy load adapters")
 

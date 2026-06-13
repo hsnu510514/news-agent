@@ -478,7 +478,7 @@ async def test_ingest_akshare_cpi_ppi_parsing() -> None:
     from src.ingest.macro_fetcher import ingest_akshare
 
     with (
-        patch("src.ingest.macro_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
     ):
         # Act
         saved_count = await ingest_akshare()
@@ -526,7 +526,7 @@ async def test_ingest_fred_pmi() -> None:
     from src.ingest.macro_fetcher import ingest_fred
 
     with (
-        patch("src.ingest.macro_fetcher.async_session_factory", mock_session_factory),
+        patch("src.ingest.pipeline.async_session_factory", mock_session_factory),
         patch("src.ingest.macro_fetcher.settings") as mock_settings,
     ):
         mock_settings.FRED_API_KEY = "test_fred_key"

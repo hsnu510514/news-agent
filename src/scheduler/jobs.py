@@ -45,34 +45,18 @@ async def _job_collector(task_run_id: str | None = None) -> None:
 
 async def _job_earnings(task_run_id: str | None = None) -> None:
     logger.info("Starting earnings data ingestion")
-    from src.ingest.earnings_fetcher import ingest_yfinance_earnings
-    count = await ingest_yfinance_earnings()
-    logger.info("Earnings ingestion complete: %d earnings saved", count)
-    if task_run_id:
-        async with async_session_factory() as session:
-            await session.execute(
-                update(TaskRun)
-                .where(TaskRun.id == task_run_id)
-                .values(processed_count=count, total_count=count)
-            )
-            await session.commit()
+    from src.ingest.pipeline import ingest_source
+    from src.ingest.interface import IngestionSourceType
+    summary = await ingest_source(IngestionSourceType.EARNINGS, task_run_id=task_run_id)
+    logger.info("Earnings ingestion complete: %d earnings saved", summary.saved_count)
 
 
 async def _job_macro(task_run_id: str | None = None) -> None:
     logger.info("Starting macro data ingestion")
-    from src.ingest.macro_fetcher import ingest_fred, ingest_akshare
-    fred_count = await ingest_fred()
-    akshare_count = await ingest_akshare()
-    logger.info("Macro ingestion complete: FRED=%d, AKShare=%d", fred_count, akshare_count)
-    if task_run_id:
-        async with async_session_factory() as session:
-            total = fred_count + akshare_count
-            await session.execute(
-                update(TaskRun)
-                .where(TaskRun.id == task_run_id)
-                .values(processed_count=total, total_count=total)
-            )
-            await session.commit()
+    from src.ingest.pipeline import ingest_source
+    from src.ingest.interface import IngestionSourceType
+    summary = await ingest_source(IngestionSourceType.MACRO, task_run_id=task_run_id)
+    logger.info("Macro ingestion complete: %d indicators saved", summary.saved_count)
 
 
 
