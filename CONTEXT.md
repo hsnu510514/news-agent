@@ -77,3 +77,8 @@ _Avoid_: backlog, backlog news, unprocessed article
 An administrative diagnostic view and API designed to detect and resolve potential duplicate subjects and duplicate insights in the Insight Vault (via merging or ignoring) using name similarity and vector embedding analysis.
 _Avoid_: duplicate check, merge utility, duplicate report
 
+**Two-Tier Fallback**:
+A resilience strategy that redirects failed LLM tasks to a designated alternative model (a lightweight model for low-complexity filtering/summarization, or a reasoning model for high-complexity analysis) to prevent pipeline stalls.
+_Avoid_: model failover, fallback routing
+
+

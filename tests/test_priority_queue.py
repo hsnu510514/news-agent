@@ -74,29 +74,27 @@ async def test_priority_queue_pacing():
 
 
 @pytest.mark.asyncio
-async def test_priority_queue_transient_retry():
+async def test_priority_queue_no_queue_level_retry():
     queue = LLMTaskQueue()
     queue.pacing_delay = 0.0
-    queue.backoff_factor = 0.001  # Make backoff instant for tests
     
     call_count = 0
     
     async def mock_failing_task():
         nonlocal call_count
         call_count += 1
-        if call_count < 3:
-            raise Exception("Rate limit exceeded (HTTP 429)")
-        return "success_after_retries"
+        raise Exception("Rate limit exceeded (HTTP 429)")
         
     fut = await queue.submit_task(priority=1, func=mock_failing_task)
     queue.start()
     
-    res = await fut
+    with pytest.raises(Exception, match="Rate limit exceeded"):
+        await fut
     await queue.stop()
     
-    assert res == "success_after_retries"
-    # Should have run 3 times: 2 failures, 1 success
-    assert call_count == 3
+    # Verify it was tried exactly once (no queue-level retries)
+    assert call_count == 1
+
 
 
 @pytest.mark.asyncio

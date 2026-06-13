@@ -281,22 +281,16 @@ class LLMTaskQueue:
                     self._queue.task_done()
                     continue
                 
-                success = False
-                attempts = 0
-                max_retries = 3
-                
-                while not success and attempts <= max_retries:
-                    try:
-                        result = await func(*args, **kwargs)
-                        self.status_tracker.record_success()
-                        future.set_result(result)
-                        success = True
-                    except Exception as e:
-                        error_msg = str(e)
-                        is_rate_limit = "429" in error_msg or "rate limit" in error_msg.lower() or "quota" in error_msg.lower()
-                        
-                        # Check if it's a hard/permanent daily quota limit
-                        is_permanent_quota = "quota exceeded" in error_msg.lower() and (
+                try:
+                    result = await func(*args, **kwargs)
+                    self.status_tracker.record_success()
+                    future.set_result(result)
+                except Exception as e:
+                    error_msg = str(e)
+                    is_rate_limit = "429" in error_msg or "rate limit" in error_msg.lower() or "quota" in error_msg.lower()
+                    
+                    is_permanent_quota = isinstance(e, DailyQuotaExhaustedError) or (
+                        "quota exceeded" in error_msg.lower() and (
                             "daily" in error_msg.lower() 
                             or "limit: 0" in error_msg.lower() 
                             or "requests_per_day" in error_msg.lower()
@@ -304,28 +298,19 @@ class LLMTaskQueue:
                             or "per_day" in error_msg.lower()
                             or "perday" in error_msg.lower()
                         )
-                        
-                        if is_permanent_quota:
-                            self._quota_exhausted = True
-                            self.status_tracker.record_failure(error_msg, is_rate_limit)
-                            future.set_exception(DailyQuotaExhaustedError(error_msg))
-                            # Fail all other pending tasks in the queue
-                            await self._abort_all_pending_tasks(DailyQuotaExhaustedError(error_msg))
-                            self._running = False
-                            break
-                        
-                        if is_rate_limit and attempts < max_retries:
-                            attempts += 1
-                            sleep_duration = self.backoff_factor * (2 ** (attempts - 1))
-                            logger.warning(
-                                "Transient rate limit hit. Retrying task (attempt %d/%d) in %.2fs. Error: %s",
-                                attempts, max_retries, sleep_duration, error_msg
-                            )
-                            await asyncio.sleep(sleep_duration)
-                        else:
-                            self.status_tracker.record_failure(error_msg, is_rate_limit)
-                            future.set_exception(e)
-                            break
+                    )
+                    
+                    if is_permanent_quota:
+                        self._quota_exhausted = True
+                        self.status_tracker.record_failure(error_msg, is_rate_limit)
+                        exc = e if isinstance(e, DailyQuotaExhaustedError) else DailyQuotaExhaustedError(error_msg)
+                        future.set_exception(exc)
+                        # Fail all other pending tasks in the queue
+                        await self._abort_all_pending_tasks(exc)
+                        self._running = False
+                    else:
+                        self.status_tracker.record_failure(error_msg, is_rate_limit)
+                        future.set_exception(e)
                 
                 self._queue.task_done()
                 
@@ -427,6 +412,75 @@ async def tracked_aembedding(model: str, input: list[str], **kwargs) -> Any:
         raise e
 
 
+async def call_with_fallback(
+    primary_model: str,
+    fallback_model: str | None,
+    call_fn: Any,
+    max_retries: int = 3,
+    backoff_factor: float = 2.0,
+) -> Any:
+    if not primary_model:
+        raise ValueError("Model configuration is incomplete.")
+
+    models_to_try = [(primary_model, "primary")]
+    if fallback_model and fallback_model != primary_model:
+        models_to_try.append((fallback_model, "fallback"))
+
+    last_exception = None
+
+    for model, model_role in models_to_try:
+        attempts = 0
+        while attempts <= max_retries:
+            try:
+                return await call_fn(model)
+            except Exception as e:
+                last_exception = e
+                error_msg = str(e)
+                
+                # Check for bad request / validation errors
+                is_bad_request = (
+                    (hasattr(e, "status_code") and e.status_code == 400)
+                    or "validation" in error_msg.lower()
+                    or "bad_request" in error_msg.lower()
+                    or "bad request" in error_msg.lower()
+                )
+                if is_bad_request:
+                    logger.error(f"Bad request or validation error on {model_role} model {model}: {error_msg}. Aborting.")
+                    raise e
+
+                # Check if it's a permanent quota error
+                is_permanent_quota = isinstance(e, DailyQuotaExhaustedError) or (
+                    "quota exceeded" in error_msg.lower() and (
+                        "daily" in error_msg.lower() 
+                        or "limit: 0" in error_msg.lower() 
+                        or "requests_per_day" in error_msg.lower()
+                        or "requests per day" in error_msg.lower()
+                        or "per_day" in error_msg.lower()
+                        or "perday" in error_msg.lower()
+                    )
+                )
+                if is_permanent_quota:
+                    logger.warning(f"Permanent quota exhausted for {model_role} model {model}: {error_msg}.")
+                    break
+
+                # Otherwise, it's a transient error. Retry with backoff.
+                if attempts < max_retries:
+                    attempts += 1
+                    sleep_duration = backoff_factor * (2 ** (attempts - 1))
+                    logger.warning(
+                        f"Transient error on {model_role} model {model} (attempt {attempts}/{max_retries + 1}). "
+                        f"Retrying in {sleep_duration:.2f}s. Error: {error_msg}"
+                    )
+                    await asyncio.sleep(sleep_duration)
+                else:
+                    logger.warning(f"All {max_retries + 1} attempts exhausted on {model_role} model {model}.")
+                    break
+
+    if last_exception:
+        raise last_exception
+    raise RuntimeError("No model was executed successfully.")
+
+
 # Raw LLM completion functions wrapped for the queue
 async def _raw_classify(text: str, system_prompt: str | None = None) -> str:
     messages = []
@@ -440,27 +494,19 @@ async def _raw_classify(text: str, system_prompt: str | None = None) -> str:
     messages.append({"role": "system", "content": sys_prompt})
     messages.append({"role": "user", "content": text})
 
-    try:
+    async def make_call(m: str):
         response = await tracked_acompletion(
-            model=settings.LLM_CLASSIFY_MODEL,
+            model=m,
             messages=messages,
             temperature=0.1,
         )
         return response.choices[0].message.content
-    except Exception as primary_exc:
-        fallback_model = settings.LLM_REASONING_FALLBACK_MODEL
-        if fallback_model and fallback_model != settings.LLM_CLASSIFY_MODEL:
-            logger.warning(
-                "Primary classification model %s failed. Falling back to %s. Error: %s",
-                settings.LLM_CLASSIFY_MODEL, fallback_model, primary_exc
-            )
-            response = await tracked_acompletion(
-                model=fallback_model,
-                messages=messages,
-                temperature=0.1,
-            )
-            return response.choices[0].message.content
-        raise primary_exc
+
+    return await call_with_fallback(
+        primary_model=settings.LLM_CLASSIFY_MODEL,
+        fallback_model=settings.LLM_REASONING_FALLBACK_MODEL,
+        call_fn=make_call,
+    )
 
 
 async def classify(text: str, system_prompt: str | None = None, priority: int = 2) -> str:
@@ -473,27 +519,20 @@ async def _raw_check_relevance(text: str, system_prompt: str | None = None) -> s
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": text})
-    try:
+
+    async def make_call(m: str):
         response = await tracked_acompletion(
-            model=settings.LLM_RELEVANCE_MODEL,
+            model=m,
             messages=messages,
             temperature=0.1,
         )
         return response.choices[0].message.content
-    except Exception as primary_exc:
-        fallback_model = settings.LLM_LIGHTWEIGHT_FALLBACK_MODEL
-        if fallback_model and fallback_model != settings.LLM_RELEVANCE_MODEL:
-            logger.warning(
-                "Primary relevance model %s failed. Falling back to %s. Error: %s",
-                settings.LLM_RELEVANCE_MODEL, fallback_model, primary_exc
-            )
-            response = await tracked_acompletion(
-                model=fallback_model,
-                messages=messages,
-                temperature=0.1,
-            )
-            return response.choices[0].message.content
-        raise primary_exc
+
+    return await call_with_fallback(
+        primary_model=settings.LLM_RELEVANCE_MODEL,
+        fallback_model=settings.LLM_LIGHTWEIGHT_FALLBACK_MODEL,
+        call_fn=make_call,
+    )
 
 
 async def check_relevance(title: str, summary: str, priority: int = 1) -> bool:
@@ -532,27 +571,20 @@ async def _raw_summarize(text: str, system_prompt: str | None = None) -> str:
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": text})
-    try:
+
+    async def make_call(m: str):
         response = await tracked_acompletion(
-            model=settings.LLM_SUMMARIZE_MODEL,
+            model=m,
             messages=messages,
             temperature=0.3,
         )
         return response.choices[0].message.content
-    except Exception as primary_exc:
-        fallback_model = settings.LLM_LIGHTWEIGHT_FALLBACK_MODEL
-        if fallback_model and fallback_model != settings.LLM_SUMMARIZE_MODEL:
-            logger.warning(
-                "Primary summarization model %s failed. Falling back to %s. Error: %s",
-                settings.LLM_SUMMARIZE_MODEL, fallback_model, primary_exc
-            )
-            response = await tracked_acompletion(
-                model=fallback_model,
-                messages=messages,
-                temperature=0.3,
-            )
-            return response.choices[0].message.content
-        raise primary_exc
+
+    return await call_with_fallback(
+        primary_model=settings.LLM_SUMMARIZE_MODEL,
+        fallback_model=settings.LLM_LIGHTWEIGHT_FALLBACK_MODEL,
+        call_fn=make_call,
+    )
 
 
 async def summarize(text: str, system_prompt: str | None = None, priority: int = 2) -> str:
@@ -565,27 +597,20 @@ async def _raw_deep_analysis(text: str, system_prompt: str | None = None) -> str
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": text})
-    try:
+
+    async def make_call(m: str):
         response = await tracked_acompletion(
-            model=settings.LLM_ANALYSIS_MODEL,
+            model=m,
             messages=messages,
             temperature=0.2,
         )
         return response.choices[0].message.content
-    except Exception as primary_exc:
-        fallback_model = settings.LLM_REASONING_FALLBACK_MODEL
-        if fallback_model and fallback_model != settings.LLM_ANALYSIS_MODEL:
-            logger.warning(
-                "Primary deep analysis model %s failed. Falling back to %s. Error: %s",
-                settings.LLM_ANALYSIS_MODEL, fallback_model, primary_exc
-            )
-            response = await tracked_acompletion(
-                model=fallback_model,
-                messages=messages,
-                temperature=0.2,
-            )
-            return response.choices[0].message.content
-        raise primary_exc
+
+    return await call_with_fallback(
+        primary_model=settings.LLM_ANALYSIS_MODEL,
+        fallback_model=settings.LLM_REASONING_FALLBACK_MODEL,
+        call_fn=make_call,
+    )
 
 
 async def deep_analysis(text: str, system_prompt: str | None = None, priority: int = 2) -> str:
@@ -594,31 +619,19 @@ async def deep_analysis(text: str, system_prompt: str | None = None, priority: i
 
 
 async def _raw_get_embedding(text: str) -> list[float]:
-    try:
+    async def make_call(m: str):
         response = await tracked_aembedding(
-            model=settings.LLM_EMBED_MODEL,
+            model=m,
             input=[text],
             dimensions=768,
         )
         return response.data[0]["embedding"]
-    except Exception as primary_exc:
-        fallback_model = settings.LLM_EMBED_FALLBACK_MODEL
-        if fallback_model:
-            logger.warning(
-                "Primary embedding model %s failed. Falling back to %s. Error: %s",
-                settings.LLM_EMBED_MODEL, fallback_model, primary_exc
-            )
-            try:
-                response = await tracked_aembedding(
-                    model=fallback_model,
-                    input=[text],
-                    dimensions=768,
-                )
-                return response.data[0]["embedding"]
-            except Exception as fallback_exc:
-                logger.error("Fallback embedding model %s also failed: %s", fallback_model, fallback_exc)
-                raise fallback_exc
-        raise primary_exc
+
+    return await call_with_fallback(
+        primary_model=settings.LLM_EMBED_MODEL,
+        fallback_model=settings.LLM_EMBED_FALLBACK_MODEL,
+        call_fn=make_call,
+    )
 
 
 async def get_embedding(text: str, priority: int = 2) -> list[float]:
