@@ -49,9 +49,9 @@ A single execution run of any background process (such as news fetching, dedupli
 _Avoid_: job run, scheduler run
 _Note_: The database schema uses the historical term `TaskRun` (`task_runs` table) to avoid breaking migrations. This alignment is deferred as planned technical debt.
 
-**Volume Trigger**:
-A trigger mechanism that automatically starts a Task Execution once the backlog count for that task (e.g., pending raw articles or pending relevant articles) reaches a specified threshold.
-_Avoid_: quantity trigger, queue trigger
+**Chained Task Trigger**:
+A trigger mechanism that automatically starts a downstream Task Execution (e.g., News Pre-processing after news fetching, or AI Analysis after pre-processing) upon successful completion of the preceding task.
+_Avoid_: automatic follow-up, task chaining, sequential trigger
 
 **Job Cooldown**:
 A configurable rest period (break time) enforced after a task completes (succeeds, fails, or times out) during which the task cannot be re-executed, preventing CPU/GPU resource exhaustion.

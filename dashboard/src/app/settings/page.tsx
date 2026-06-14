@@ -61,7 +61,6 @@ function JobCard({
   const [enabled, setEnabled] = useState(job.enabled);
   const [triggerType, setTriggerType] = useState(job.trigger_type);
   const [scheduleValue, setScheduleValue] = useState(job.schedule_value);
-  const [volumeThreshold, setVolumeThreshold] = useState(job.volume_threshold !== null ? String(job.volume_threshold) : "");
   const [cooldownMinutes, setCooldownMinutes] = useState(job.cooldown_minutes);
   
   const [isSaving, setIsSaving] = useState(false);
@@ -111,7 +110,6 @@ function JobCard({
           enabled,
           trigger_type: triggerType,
           schedule_value: scheduleValue,
-          volume_threshold: volumeThreshold.trim() !== "" ? Number(volumeThreshold) : null,
           cooldown_minutes: Number(cooldownMinutes),
         }),
       });
@@ -190,7 +188,6 @@ function JobCard({
   const isScheduleDirty = enabled !== job.enabled || 
     triggerType !== job.trigger_type || 
     scheduleValue !== job.schedule_value ||
-    (volumeThreshold.trim() !== "" ? Number(volumeThreshold) : null) !== job.volume_threshold ||
     Number(cooldownMinutes) !== job.cooldown_minutes;
 
   return (
@@ -249,40 +246,15 @@ function JobCard({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Cooldown (Minutes)</label>
-            <Input
-              type="number"
-              min="0"
-              value={cooldownMinutes}
-              onChange={(e) => setCooldownMinutes(Number(e.target.value))}
-              className="h-9 text-sm"
-            />
-          </div>
-
-          {(job.id === "preprocessing" || job.id === "analysis") ? (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Volume Threshold</label>
-              <Input
-                type="number"
-                min="0"
-                placeholder="Disabled"
-                value={volumeThreshold}
-                onChange={(e) => setVolumeThreshold(e.target.value)}
-                className="h-9 text-sm"
-              />
-            </div>
-          ) : (
-            <div className="space-y-1 opacity-40 select-none">
-              <label className="text-xs font-medium text-muted-foreground">Volume Trigger</label>
-              <Input
-                disabled
-                placeholder="Not Applicable"
-                className="h-9 text-sm bg-muted/20"
-              />
-            </div>
-          )}
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Cooldown (Minutes)</label>
+          <Input
+            type="number"
+            min="0"
+            value={cooldownMinutes}
+            onChange={(e) => setCooldownMinutes(Number(e.target.value))}
+            className="h-9 text-sm"
+          />
         </div>
 
         {/* Execution Metadata */}

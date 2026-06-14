@@ -112,64 +112,6 @@ async def _job_divergence(task_run_id: str | None = None) -> None:
             await session.commit()
 
 
-async def _job_volume_check() -> None:
-    logger.debug("Running volume trigger checks")
-    async with async_session_factory() as session:
-        try:
-            # 1. Fetch enabled configs that have volume threshold
-            stmt_configs = select(JobConfig).where(
-                JobConfig.enabled == True,
-                JobConfig.volume_threshold.isnot(None),
-                JobConfig.volume_threshold > 0
-            )
-            configs = (await session.execute(stmt_configs)).scalars().all()
-            if not configs:
-                return
-
-            for config in configs:
-                # 2. Check if already running
-                stmt_running = select(TaskRun).where(
-                    TaskRun.job_id == config.id,
-                    TaskRun.status == "running"
-                )
-                running_runs = (await session.execute(stmt_running)).scalars().all()
-                if running_runs and isinstance(running_runs, list):
-                    continue
-
-                # 3. Check cooldown
-                if config.last_run_time:
-                    cooldown = config.cooldown_minutes or 5
-                    elapsed = datetime.now(timezone.utc) - config.last_run_time
-                    if elapsed < timedelta(minutes=cooldown):
-                        continue
-
-                # 4. Count pending volume
-                pending_count = 0
-                if config.id == "preprocessing":
-                    stmt_count = select(func.count()).select_from(NewsArticle).where(NewsArticle.is_relevant.is_(None))
-                    pending_count = (await session.execute(stmt_count)).scalar() or 0
-                elif config.id == "analysis":
-                    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-                    stmt_count = (
-                        select(func.count())
-                        .select_from(NewsArticle)
-                        .outerjoin(AnalysisResult, NewsArticle.id == AnalysisResult.article_id)
-                        .where(AnalysisResult.id.is_(None))
-                        .where(NewsArticle.is_relevant == True)
-                        .where(NewsArticle.content.isnot(None))
-                        .where(NewsArticle.published_at >= cutoff)
-                    )
-                    pending_count = (await session.execute(stmt_count)).scalar() or 0
-
-                # 5. Trigger if threshold met
-                if pending_count >= config.volume_threshold:
-                    logger.info(f"Volume trigger threshold met for job {config.id} (Backlog: {pending_count} >= {config.volume_threshold}). Triggering task.")
-                    import asyncio
-                    asyncio.create_task(run_job_wrapper(config.id, trigger_type="volume"))
-        except Exception:
-            logger.exception("Error running volume check task")
-
-
 DEFAULT_JOBS = [
     {
         "id": "rss_news",
@@ -234,13 +176,6 @@ DEFAULT_JOBS = [
         "trigger_type": "cron",
         "schedule_value": "0 2 * * *",
     },
-    {
-        "id": "volume_check",
-        "name": "Volume Trigger Checker",
-        "enabled": True,
-        "trigger_type": "interval",
-        "schedule_value": "1",
-    },
 ]
 
 
@@ -269,7 +204,6 @@ async def run_job_wrapper(job_id: str, trigger_type: str = "scheduled", task_run
         "analysis": _job_analysis,
         "briefing": _job_briefing,
         "divergence": _job_divergence,
-        "volume_check": _job_volume_check,
     }
 
     func = job_funcs.get(job_id)
@@ -305,15 +239,14 @@ async def run_job_wrapper(job_id: str, trigger_type: str = "scheduled", task_run
                     await session.commit()
                 return
 
-            # Check cooldown break
+            # Check cooldown break and enabled status
             if trigger_type != "manual":
                 stmt_config = select(JobConfig).where(JobConfig.id == job_id)
                 config = (await session.execute(stmt_config)).scalar_one_or_none()
-                if config and isinstance(config, JobConfig) and isinstance(config.last_run_time, datetime):
-                    cooldown = config.cooldown_minutes or 5
-                    elapsed = datetime.now(timezone.utc) - config.last_run_time
-                    if elapsed < timedelta(minutes=cooldown):
-                        logger.info(f"Job {job_id} is in cooldown break. Skipping this execution.")
+                if config and isinstance(config, JobConfig):
+                    # Check if enabled
+                    if not config.enabled:
+                        logger.info(f"Job {job_id} is disabled. Skipping this execution.")
                         if task_run_id:
                             await session.execute(
                                 update(TaskRun)
@@ -321,11 +254,30 @@ async def run_job_wrapper(job_id: str, trigger_type: str = "scheduled", task_run
                                 .values(
                                     status="failed",
                                     end_time=datetime.now(timezone.utc),
-                                    message="Skipped: Job is in cooldown break."
+                                    message="Skipped: Job is disabled."
                                 )
                             )
                             await session.commit()
                         return
+
+                    # Check cooldown break
+                    if isinstance(config.last_run_time, datetime):
+                        cooldown = config.cooldown_minutes or 5
+                        elapsed = datetime.now(timezone.utc) - config.last_run_time
+                        if elapsed < timedelta(minutes=cooldown):
+                            logger.info(f"Job {job_id} is in cooldown break. Skipping this execution.")
+                            if task_run_id:
+                                await session.execute(
+                                    update(TaskRun)
+                                    .where(TaskRun.id == task_run_id)
+                                    .values(
+                                        status="failed",
+                                        end_time=datetime.now(timezone.utc),
+                                        message="Skipped: Job is in cooldown break."
+                                    )
+                                )
+                                await session.commit()
+                            return
         except Exception:
             logger.exception(f"Failed to check running/cooldown status for job {job_id}")
     
@@ -409,6 +361,16 @@ async def run_job_wrapper(job_id: str, trigger_type: str = "scheduled", task_run
                         )
                     )
             await session.commit()
+
+            # Chain downstream tasks on success
+            if status == "success":
+                import asyncio
+                if job_id in ("rss_news", "newsapi", "collector_news"):
+                    logger.info("Chaining next job: preprocessing")
+                    asyncio.create_task(run_job_wrapper("preprocessing", trigger_type="chained"))
+                elif job_id == "preprocessing":
+                    logger.info("Chaining next job: analysis")
+                    asyncio.create_task(run_job_wrapper("analysis", trigger_type="chained"))
         except Exception:
             logger.exception(f"Failed to update final job/task status in DB for {job_id}")
 

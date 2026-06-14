@@ -42,21 +42,26 @@ async def test_preprocessing_pipeline_success() -> None:
     # Stub executing queries
     # First query retrieves pending articles
     # Subsequent query in deduplication looks for existing duplicate content hash
-    mock_scalars = MagicMock()
-    mock_scalars.all.return_value = articles
-    
-    # We want scalar_one_or_none to return None for first checks (art1, art2), 
-    # but for art3 it should return art1 (since art1 was already processed with same content hash).
-    # Since SQLAlchemy is run, we mock execute's returns.
+    # We want to return the pending articles on the first query and empty list on subsequent queries.
+    called_count = 0
     from src.ingest.preprocessing import hash_content
     hash1 = hash_content(art1.content)
     
     async def side_effect_execute(stmt, *args, **kwargs):
-        stmt_str = str(stmt)
+        nonlocal called_count
+        stmt_str = str(stmt).lower()
         mock_res = MagicMock()
-        if "outerjoin" in stmt_str or "news_articles.is_relevant IS NULL" in stmt_str:
+        
+        # Check if it's the pending query (fetching where is_relevant is null)
+        if "is_relevant is null" in stmt_str or "is_relevant.is_(none)" in stmt_str or "is_relevant" in stmt_str and "hash" not in stmt_str:
+            mock_scalars = MagicMock()
+            if called_count == 0:
+                mock_scalars.all.return_value = articles
+                called_count += 1
+            else:
+                mock_scalars.all.return_value = []
             mock_res.scalars.return_value = mock_scalars
-        elif "news_articles.content_hash =" in stmt_str:
+        elif "content_hash" in stmt_str:
             # Check the compiled param for content_hash_1
             try:
                 params = stmt.compile().params
